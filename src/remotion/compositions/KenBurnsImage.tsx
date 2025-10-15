@@ -29,11 +29,11 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
   
   const totalFrames = durationInSeconds * fps;
 
-  // Zoom animation
+  // Zoom animation - more dramatic for crime videos
   const scale = interpolate(
     frame,
     [0, totalFrames],
-    zoomDirection === "in" ? [1, 1.2] : [1.2, 1],
+    zoomDirection === "in" ? [1, 1.3] : [1.3, 1],
     { extrapolateRight: "clamp" }
   );
 
@@ -45,7 +45,7 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
     translateX = interpolate(
       frame,
       [0, totalFrames],
-      panDirection === "left" ? [0, -5] : [0, 5],
+      panDirection === "left" ? [0, -8] : [0, 8],
       { extrapolateRight: "clamp" }
     );
   }
@@ -54,7 +54,7 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
     translateY = interpolate(
       frame,
       [0, totalFrames],
-      panDirection === "up" ? [0, -5] : [0, 5],
+      panDirection === "up" ? [0, -8] : [0, 8],
       { extrapolateRight: "clamp" }
     );
   }
