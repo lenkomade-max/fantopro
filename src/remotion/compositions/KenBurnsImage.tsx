@@ -68,15 +68,41 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
         backgroundColor: "#000",
       }}
     >
-      <Img
-        src={src}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
-        }}
-      />
+      {panDirection === "none" ? (
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: "100%",
+          }}
+        >
+          <Img
+            src={src}
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              transform: `translate(-50%, -50%) scale(${scale})`,
+            }}
+          />
+        </div>
+      ) : (
+        <Img
+          src={src}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+            transformOrigin: "center center",
+            transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
+          }}
+        />
+      )}
     </div>
   );
 };

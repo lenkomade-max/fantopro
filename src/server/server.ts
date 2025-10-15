@@ -19,6 +19,10 @@ export class Server {
     this.config = config;
     this.app = express();
 
+    // Increase payload size limit for large photo uploads
+    this.app.use(express.json({ limit: '50mb' }));
+    this.app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
     // add healthcheck endpoint
     this.app.get("/health", (req: ExpressRequest, res: ExpressResponse) => {
       res.status(200).json({ status: "ok" });
