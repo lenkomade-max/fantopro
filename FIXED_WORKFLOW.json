@@ -1,0 +1,175 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-1088, -96],
+      "id": "f25ee52e-7a70-425d-b0f9-29aa9509da41",
+      "name": "Google Drive - Download Crime Photos",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "veaNxOWd2iLTsjgc",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Скачивает 20-30 фото/видео из указанной папки на Google Drive"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "limit": 10,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1R8DSsDKqGBaBvI4D1T_L1AM9vHz0Y-Yq",
+            "mode": "list",
+            "cachedResultName": "Baza-n8n",
+            "cachedResultUrl": "https://drive.google.com/drive/folders/1R8DSsDKqGBaBvI4D1T_L1AM9vHz0Y-Yq"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-1248, -80],
+      "id": "80de3e07-02a4-4692-8028-57cbd8819101",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "veaNxOWd2iLTsjgc",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-320, -128],
+      "id": "0bfffd9a-1bcb-403a-9b2e-710a208b4d26",
+      "name": "Extract Output for API"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "files",
+        "options": {
+          "includeBinaries": true
+        }
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [-944, -112],
+      "id": "40962f24-4031-4f4b-9c9d-1973e161cb67",
+      "name": "Aggregate Files2"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ ({\n  narration: $node[\"Crime Scriptwriter Agent\"].json[\"output\"],\n  files: $json.files\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-768, -144],
+      "id": "0a70e15b-1a78-4ad5-8752-2bffa62cd619",
+      "name": "Build Fanta Payload2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "Ты — JSON Generator для FantaProjekt API.\n\nВХОД: { narration, files }\n- narration = текст озвучки\n- files = массив с binary data фото/видео\n\nВЫХОД: ТОЛЬКО валидный JSON БЕЗ markdown, БЕЗ текста, БЕЗ объяснений.\n\nСТРОГАЯ СХЕМА:\n{\n  \"scenes\": [{\n    \"text\": \"<весь narration без изменений>\",\n    \"media\": {\n      \"type\": \"files\",\n      \"files\": [\n        {\n          \"filename\": \"<из files[i].json.name>\",\n          \"data\": \"<из files[i].binary.data>\",\n          \"mimeType\": \"image/jpeg\"\n        }\n      ]\n    },\n    \"textOverlays\": [\n      {\n        \"text\": \"<7-10 слов из начала narration>\",\n        \"position\": {\n          \"x\": \"center\",\n          \"y\": \"top\"\n        },\n        \"style\": {\n          \"fontSize\": 42,\n          \"fontFamily\": \"Arial\",\n          \"color\": \"#FFFFFF\",\n          \"backgroundColor\": \"transparent\",\n          \"padding\": 20\n        },\n        \"animation\": \"fadeIn\",\n        \"timing\": {\n          \"start\": 0,\n          \"end\": 3\n        }\n      },\n      {\n        \"text\": \"<5-7 слов из конца narration>\",\n        \"position\": {\n          \"x\": \"center\",\n          \"y\": \"bottom\"\n        },\n        \"style\": {\n          \"fontSize\": 38,\n          \"color\": \"#FFFFFF\",\n          \"backgroundColor\": \"#1E1E1E\",\n          \"padding\": 15\n        },\n        \"animation\": \"fadeIn\"\n      }\n    ]\n  }],\n  \"config\": {\n    \"voice\": \"am_onyx\",\n    \"music\": \"dark\",\n    \"musicVolume\": \"medium\",\n    \"orientation\": \"portrait\",\n    \"captionPosition\": \"center\",\n    \"captionBackgroundColor\": \"#1E1E1E\",\n    \"paddingBack\": 2000\n  }\n}\n\nПРАВИЛА:\n✅ media.type ВСЕГДА \"files\"\n✅ media.files - массив объектов {filename, data, mimeType}\n✅ position ВСЕГДА объект {x: \"center\", y: \"top\"|\"bottom\"}\n✅ style ВСЕГДА объект внутри textOverlays\n✅ animation ТОЛЬКО: \"fadeIn\", \"slideIn\", \"bounce\", \"pulse\", \"none\"\n✅ timing опционально: {start: число, end: число}\n\n❌ ЗАПРЕЩЕНО:\n- type: \"VHS01\", \"VHS02\", \"Arrow\" или другие выдуманные типы\n- zoomHint\n- alignment  \n- position как строка (\"top\", \"bottom\")\n- startTime, endTime (используй timing внутри textOverlays)\n- любые параметры кроме указанных в схеме\n\nПРОВЕРКА:\n1. text = весь narration?\n2. media.type = \"files\"?\n3. position = {x: ..., y: ...}?\n4. style внутри textOverlays?\n5. НЕТ VHS/Arrow/zoomHint?\n\nВЕРНУТЬ ТОЛЬКО JSON!"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.8,
+      "position": [-592, -128],
+      "id": "b0bc6f6d-44b3-4ab1-9dd6-df36153c7163",
+      "name": "Video Creator Agent (MCP)2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://172.17.0.1:3123/api/short-video",
+        "sendBody": true,
+        "contentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-128, -128],
+      "id": "d303b372-1cc7-4121-803a-3be9deca37d2",
+      "name": "HTTP Request"
+    }
+  ],
+  "connections": {
+    "Google Drive - Download Crime Photos": {
+      "main": [[{
+        "node": "Aggregate Files2",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "Search files and folders": {
+      "main": [[{
+        "node": "Google Drive - Download Crime Photos",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "Extract Output for API": {
+      "main": [[{
+        "node": "HTTP Request",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "Aggregate Files2": {
+      "main": [[{
+        "node": "Build Fanta Payload2",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "Build Fanta Payload2": {
+      "main": [[{
+        "node": "Video Creator Agent (MCP)2",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "Video Creator Agent (MCP)2": {
+      "main": [[{
+        "node": "Extract Output for API",
+        "type": "main",
+        "index": 0
+      }]]
+    },
+    "HTTP Request": {
+      "main": [[]]
+    }
+  },
+  "meta": {
+    "instanceId": "975faaa5f3978f59073ca81b81a65706e3fa6015f4eec5c32db6d4746e496a56"
+  }
+}
+
+
+

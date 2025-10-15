@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  fantaprojekt:
+    container_name: fantaprojekt
+    image: node:18-alpine
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /root/FantaProjekt/node_modules:/app/node_modules
+    ports:
+      - "3123:3123"
+    environment:
+      - PORT=3123
+      - LOG_LEVEL=info
+      - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+    command: node dist/index.js
+    networks:
+      - root_default
+
+networks:
+  root_default:
+    external: true
+

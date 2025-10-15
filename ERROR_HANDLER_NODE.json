@@ -1,0 +1,132 @@
+{
+    "nodes": [
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.status }}",
+                      "rightValue": "failed",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "video-failed-check"
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 2
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.status }}",
+                      "rightValue": "ready",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "video-ready-check"
+                    }
+                  ],
+                  "combinator": "and"
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3.3,
+        "position": [
+          672,
+          2208
+        ],
+        "id": "5f9192ff-b5dc-4cf5-a741-2cfc00caca24",
+        "name": "Video Status Switch"
+      },
+      {
+        "parameters": {
+          "mode": "raw",
+          "jsonOutput": "={{ {\n  error: true,\n  message: \"Видео \" + $json.videoId + \" не удалось создать. Статус: \" + $json.status,\n  videoId: $json.videoId,\n  status: $json.status,\n  timestamp: new Date().toISOString(),\n  action: \"STOP_WORKFLOW\"\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [896, 2208],
+        "id": "error-handler-node",
+        "name": "Handle Video Error"
+      },
+      {
+        "parameters": {
+          "mode": "raw",
+          "jsonOutput": "={{ {\n  success: true,\n  message: \"Видео \" + $json.videoId + \" успешно создано!\",\n  videoId: $json.videoId,\n  status: $json.status,\n  timestamp: new Date().toISOString(),\n  action: \"CONTINUE_WORKFLOW\"\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [896, 2400],
+        "id": "success-handler-node",
+        "name": "Handle Video Success"
+      },
+      {
+        "parameters": {
+          "mode": "raw",
+          "jsonOutput": "={{ {\n  waiting: true,\n  message: \"Видео \" + $json.videoId + \" еще обрабатывается. Статус: \" + $json.status,\n  videoId: $json.videoId,\n  status: $json.status,\n  timestamp: new Date().toISOString(),\n  action: \"WAIT_AGAIN\"\n} }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [896, 2592],
+        "id": "wait-handler-node",
+        "name": "Handle Video Waiting"
+      }
+    ],
+    "connections": {
+      "Video Status Switch": {
+        "main": [
+          [
+            {
+              "node": "Handle Video Error",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Handle Video Success",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Handle Video Waiting",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {},
+    "meta": {
+      "instanceId": "975faaa5f3978f59073ca81b81a65706e3fa6015f4eec5c32db6d4746e496a56"
+    }
+  }
