@@ -151,4 +151,4 @@ public
 
 # Temporary folders
 tmp/
-temp/
+temp/\n# Exclude nested repo\noriginal/
