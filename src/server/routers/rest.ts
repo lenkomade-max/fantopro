@@ -22,7 +22,9 @@ export class APIRouter {
     this.router = express.Router();
     this.shortCreator = shortCreator;
 
-    this.router.use(express.json());
+    // Increase payload limit to support base64 photo uploads in JSON
+    this.router.use(express.json({ limit: "50mb" }));
+    this.router.use(express.urlencoded({ limit: "50mb", extended: true }));
 
     this.setupRoutes();
   }

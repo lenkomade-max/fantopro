@@ -29,11 +29,11 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
   
   const totalFrames = durationInSeconds * fps;
 
-  // Zoom animation
+  // Zoom animation - more dramatic for crime videos
   const scale = interpolate(
     frame,
     [0, totalFrames],
-    zoomDirection === "in" ? [1, 1.2] : [1.2, 1],
+    zoomDirection === "in" ? [1, 1.3] : [1.3, 1],
     { extrapolateRight: "clamp" }
   );
 
@@ -45,7 +45,7 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
     translateX = interpolate(
       frame,
       [0, totalFrames],
-      panDirection === "left" ? [0, -5] : [0, 5],
+      panDirection === "left" ? [0, -8] : [0, 8],
       { extrapolateRight: "clamp" }
     );
   }
@@ -54,7 +54,7 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
     translateY = interpolate(
       frame,
       [0, totalFrames],
-      panDirection === "up" ? [0, -5] : [0, 5],
+      panDirection === "up" ? [0, -8] : [0, 8],
       { extrapolateRight: "clamp" }
     );
   }
@@ -68,15 +68,41 @@ export const KenBurnsImage: React.FC<KenBurnsImageProps> = ({
         backgroundColor: "#000",
       }}
     >
-      <Img
-        src={src}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
-        }}
-      />
+      {panDirection === "none" ? (
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: "100%",
+          }}
+        >
+          <Img
+            src={src}
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              transform: `translate(-50%, -50%) scale(${scale})`,
+            }}
+          />
+        </div>
+      ) : (
+        <Img
+          src={src}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition: "center",
+            transformOrigin: "center center",
+            transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
+          }}
+        />
+      )}
     </div>
   );
 };
