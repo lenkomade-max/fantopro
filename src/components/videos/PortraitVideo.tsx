@@ -112,18 +112,33 @@ export const PortraitVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
             )}
             <Audio src={audio.url} />
             
-            {/* Blend Effects */}
-            {effects?.map((effect: any, effectIdx: number) => (
-              <BlendOverlay
-                key={`effect-${i}-${effectIdx}`}
-                overlayPath={effect.localPath}
-                blendMode={effect.blendMode}
-                opacity={effect.opacity}
-                isVideo={effect.isVideo}
-                duration={effect.duration}
-                sceneDuration={sceneDuration}
-              />
-            ))}
+            {/* Blend Effects - Process through EffectManager */}
+            {effects?.map((effect: any, effectIdx: number) => {
+              // If effect has staticEffectPath, construct localPath
+              let processedEffect = effect;
+              if (effect.staticEffectPath && !effect.localPath) {
+                // Construct local path from static directory
+                const staticDirPath = "static"; // Relative path for Remotion
+                processedEffect = {
+                  ...effect,
+                  localPath: `${staticDirPath}/${effect.staticEffectPath}`
+                };
+              }
+              
+              return (
+                <BlendOverlay
+                  key={`effect-${i}-${effectIdx}`}
+                  overlayPath={processedEffect.localPath}
+                  publicUrl={processedEffect.publicUrl}
+                  staticEffectPath={processedEffect.staticEffectPath}
+                  blendMode={processedEffect.blendMode}
+                  opacity={processedEffect.opacity}
+                  isVideo={processedEffect.isVideo}
+                  duration={processedEffect.duration}
+                  sceneDuration={sceneDuration}
+                />
+              );
+            })}
             
             {/* Text Overlays */}
             {textOverlays?.map((overlay: any, overlayIdx: number) => (

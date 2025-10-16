@@ -40,6 +40,13 @@ export class Server {
       express.static(path.join(__dirname, "../../static")),
     );
 
+    // Serve local overlay assets (VHS/arrow) for blend effects
+    // This allows using overlayUrl: "http://localhost:<port>/overlays/<file>"
+    this.app.use(
+      "/overlays",
+      express.static("/root/media-video-maker-test"),
+    );
+
     // Serve the React app for all other routes (must be last)
     this.app.get("*", (req: ExpressRequest, res: ExpressResponse) => {
       res.sendFile(path.join(__dirname, "../../dist/ui/index.html"));

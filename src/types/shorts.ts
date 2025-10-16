@@ -77,6 +77,7 @@ const blendEffectSchema = z.object({
   type: z.literal("blend"),
   overlayUrl: z.string().url().optional().describe("URL to overlay video/image"),
   overlayFile: fileUploadSchema.optional().describe("Direct file upload for overlay"),
+  staticEffectPath: z.string().optional().describe("Path to static effect in effects directory (e.g., effects/hash.mp4)"),
   blendMode: z.nativeEnum(BlendModeEnum).describe("CSS blend mode"),
   opacity: z.number().min(0).max(1).default(1).describe("Opacity (0.0 - 1.0)"),
   duration: z.union([

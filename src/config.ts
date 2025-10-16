@@ -100,6 +100,10 @@ export class Config {
     }
   }
 
+  public getStaticDirPath(): string {
+    return this.staticDirPath;
+  }
+
   public ensureConfig() {
     if (!this.pexelsApiKey) {
       throw new Error(

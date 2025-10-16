@@ -73,6 +73,89 @@ export class APIRouter {
       },
     );
 
+    // Effects library API
+    this.router.get(
+      "/effects",
+      async (_req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const effectsDir = path.join(this.config.packageDirPath, "static", "effects");
+          await fs.ensureDir(effectsDir);
+          const files = await fs.readdir(effectsDir);
+          const items = files
+            .filter((f) => !f.startsWith("."))
+            .map((f) => ({
+              id: f.replace(/\.[^.]+$/, ""),
+              fileName: f,
+              staticEffectPath: `effects/${f}`,
+              url: `/static/effects/${f}`,
+            }));
+          res.status(200).json({ effects: items });
+        } catch (error) {
+          res.status(500).json({ error: "Failed to list effects" });
+        }
+      }
+    );
+
+    // Upload effect: expects JSON { filename, data (base64), mimeType }
+    this.router.post(
+      "/effects",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const { filename, data, mimeType } = req.body as { filename?: string; data?: string; mimeType?: string };
+          if (!data) {
+            res.status(400).json({ error: "'data' (base64) is required" });
+            return;
+          }
+
+          const base64Content = data.includes(",") ? data.split(",")[1] : data;
+          const buffer = Buffer.from(base64Content, "base64");
+          const tmpName = `upload_${Date.now()}`;
+          const ext = mimeType === "video/mp4" ? ".mp4" : mimeType === "video/webm" ? ".webm" : mimeType === "image/png" ? ".png" : mimeType === "image/jpeg" ? ".jpg" : (path.extname(filename || "") || ".mp4");
+          const tmpPath = path.join(this.config.tempDirPath, `${tmpName}${ext}`);
+          await fs.writeFile(tmpPath, buffer);
+
+          // Use OverlayCache to place into static/effects
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { OverlayCache } = require("../../short-creator/effects/OverlayCache");
+          const cache = new OverlayCache(this.config as any);
+          const { staticEffectPath, publicUrl } = await cache.put(tmpPath);
+
+          res.status(201).json({
+            fileName: path.basename(staticEffectPath),
+            staticEffectPath,
+            url: publicUrl,
+          });
+        } catch (error) {
+          this.config; // keep TS happy on unused
+          res.status(500).json({ error: "Failed to upload effect" });
+        }
+      }
+    );
+
+    this.router.delete(
+      "/effects/:id",
+      async (req: ExpressRequest, res: ExpressResponse) => {
+        try {
+          const { id } = req.params;
+          if (!id) {
+            res.status(400).json({ error: "id is required" });
+            return;
+          }
+          const effectsDir = path.join(this.config.packageDirPath, "static", "effects");
+          const candidates = await fs.readdir(effectsDir);
+          const match = candidates.find((f) => f.startsWith(id));
+          if (!match) {
+            res.status(404).json({ error: "effect not found" });
+            return;
+          }
+          await fs.remove(path.join(effectsDir, match));
+          res.status(200).json({ success: true });
+        } catch (error) {
+          res.status(500).json({ error: "Failed to delete effect" });
+        }
+      }
+    );
+
     this.router.get(
       "/short-video/:videoId/status",
       async (req: ExpressRequest, res: ExpressResponse) => {

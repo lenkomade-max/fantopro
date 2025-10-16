@@ -117,6 +117,8 @@ export const LandscapeVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
               <BlendOverlay
                 key={`effect-${i}-${effectIdx}`}
                 overlayPath={effect.localPath}
+                staticEffectPath={effect.staticEffectPath}
+                publicUrl={effect.publicUrl}
                 blendMode={effect.blendMode}
                 opacity={effect.opacity}
                 isVideo={effect.isVideo}
