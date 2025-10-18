@@ -27,6 +27,30 @@ export class Remotion {
         "root",
         `index.${config.devMode ? "ts" : "js"}`,
       ),
+      webpackOverride: (webpackConfig: any) => {
+        webpackConfig.resolve = webpackConfig.resolve || {};
+        webpackConfig.resolve.fallback = {
+          ...(webpackConfig.resolve.fallback || {}),
+          path: require.resolve('path-browserify'),
+          os: require.resolve('os-browserify/browser'),
+          crypto: require.resolve('crypto-browserify'),
+          https: require.resolve('https-browserify'),
+          http: require.resolve('stream-http'),
+          stream: require.resolve('stream-http'),
+          buffer: require.resolve('buffer/'),
+          // Exclude all Node.js core modules that don't have browser polyfills
+          fs: false,
+          'graceful-fs': false,
+          util: false,
+          assert: false,
+          constants: false,
+          url: false,
+          zlib: false,
+          querystring: false,
+          punycode: false,
+        };
+        return webpackConfig;
+      },
     });
 
     return new Remotion(bundled, config);

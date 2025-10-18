@@ -38,7 +38,7 @@ export const overlayTimeouts = {
 
 // Default overlay rendering settings
 export const overlayRenderSettings = {
-  concurrency: 1, // Reduced concurrency for stability
-  offthreadVideoCacheSizeInBytes: 100 * 1024 * 1024, // 100MB
+  concurrency: 2, // Optimized for 3 CPU cores
+  offthreadVideoCacheSizeInBytes: 150 * 1024 * 1024, // 150MB - increased for better performance
   timeoutInMilliseconds: overlayTimeouts.totalRender,
 };

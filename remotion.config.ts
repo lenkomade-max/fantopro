@@ -22,8 +22,8 @@ Config.setChromiumDisableWebSecurity(true);
 Config.setEnforceAudioTrack(false);
 
 // Default timeout settings for overlay rendering
-Config.setConcurrency(1); // Reduced concurrency for stability
-Config.setOffthreadVideoCacheSizeInBytes(100 * 1024 * 1024); // 100MB
+Config.setConcurrency(2); // Optimized for 3 CPU cores
+Config.setOffthreadVideoCacheSizeInBytes(150 * 1024 * 1024); // 150MB - increased for better performance
 
 // Export configuration for programmatic use
 export const remotionConfig = {
@@ -35,7 +35,7 @@ export const remotionConfig = {
   chromiumDisableWebSecurity: true,
   enforceAudioTrackPresence: false,
   concurrency: 1,
-  offthreadVideoCacheSizeInBytes: 100 * 1024 * 1024,
+  offthreadVideoCacheSizeInBytes: 150 * 1024 * 1024,
 };
 
 // Default timeout settings for overlay rendering
@@ -48,6 +48,27 @@ export const overlayTimeouts = {
 // Default overlay rendering settings
 export const overlayRenderSettings = {
   concurrency: 1, // Reduced concurrency for stability
-  offthreadVideoCacheSizeInBytes: 100 * 1024 * 1024, // 100MB
+  offthreadVideoCacheSizeInBytes: 150 * 1024 * 1024, // 100MB
   timeoutInMilliseconds: overlayTimeouts.totalRender,
 };
+
+// Webpack override: provide browser fallback for Node core modules used indirectly in the bundle
+// Fixes: "Module not found: Error: Can't resolve 'path'" during Remotion bundling
+Config.overrideWebpackConfig((currentConfiguration) => {
+  // Ensure objects exist
+  currentConfiguration.resolve = currentConfiguration.resolve || {};
+  // Keep existing fallbacks, then add/override Node.js polyfills
+  currentConfiguration.resolve.fallback = {
+    ...(currentConfiguration.resolve.fallback || {}),
+    path: require.resolve("path-browserify"),
+    os: require.resolve("os-browserify/browser"),
+    crypto: require.resolve("crypto-browserify"),
+    https: require.resolve("https-browserify"),
+    http: require.resolve("stream-http"),
+    stream: require.resolve("stream-http"),
+    fs: false,              // Exclude fs from browser bundle
+    'graceful-fs': false,   // Exclude graceful-fs from browser bundle
+  };
+
+  return currentConfiguration;
+});

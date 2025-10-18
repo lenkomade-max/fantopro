@@ -1,19 +1,22 @@
 /**
  * Effect Manager
- * 
- * Manages visual effects like blend overlays for video scenes.
+ *
+ * Manages visual effects using FFmpeg:
+ * - BLEND OVERLAY: VHS effects, light leaks (RGB blend)
+ * - GREEN SCREEN CHROMAKEY: Advertising banners (chromakey filter)
+ *
+ * NOTE: Canvas API removed - FFmpeg overlay methods replace Remotion overlays
  */
 
 import path from "path";
-import https from "https";
-import http from "http";
 import fs from "fs-extra";
+import ffmpeg from "fluent-ffmpeg";
 import { Config } from "../../config";
 import { logger } from "../../logger";
-import type { Effect, BlendEffect } from "../../types/shorts";
+import type { Effect, BlendEffect, BannerOverlayEffect } from "../../types/shorts";
 import { OverlayCache } from "./OverlayCache";
 
-export interface ProcessedEffect {
+export interface ProcessedBlendEffect {
   type: "blend";
   localPath: string;
   publicUrl?: string;
@@ -23,6 +26,26 @@ export interface ProcessedEffect {
   duration?: "full" | { start: number; end: number };
   isVideo: boolean;
 }
+
+export interface ProcessedBannerEffect {
+  type: "banner_overlay";
+  localPath: string;
+  publicUrl?: string;
+  staticBannerPath?: string; // 'effects/<hash>.<ext>' for staticFile()
+  chromakey: {
+    color: string;
+    similarity: number;
+    blend: number;
+  };
+  position: {
+    x: number;
+    y: number;
+  };
+  duration?: "full" | { start: number; end: number };
+  isVideo: boolean;
+}
+
+export type ProcessedEffect = ProcessedBlendEffect | ProcessedBannerEffect;
 
 export class EffectManager {
   private tempFiles: string[] = [];
@@ -38,6 +61,9 @@ export class EffectManager {
     for (const effect of effects) {
       if (effect.type === "blend") {
         const processed = await this.processBlendEffect(effect);
+        processedEffects.push(processed);
+      } else if (effect.type === "banner_overlay") {
+        const processed = await this.processBannerEffect(effect);
         processedEffects.push(processed);
       }
     }
@@ -107,7 +133,7 @@ export class EffectManager {
       if (isVideo && ext !== ".mp4") {
         throw new Error(`Only MP4 video overlays are allowed. Received: ${ext}`);
       }
-      
+
       // Кладём в стабильный кэш и используем оттуда (устойчиво для рендера)
       const cache = new OverlayCache(this.config);
       const { localPath: cachedPath, publicUrl: cachedPublicUrl, staticEffectPath: cachedStaticPath } = await cache.put(localPath);
@@ -124,7 +150,7 @@ export class EffectManager {
           throw new Error("Only MP4 video overlays are allowed for uploads.");
         }
       }
-      
+
       // Кладём в стабильный кэш и используем оттуда (устойчиво для рендера)
       const cache = new OverlayCache(this.config);
       const { localPath: cachedPath, publicUrl: cachedPublicUrl, staticEffectPath: cachedStaticPath } = await cache.put(localPath);
@@ -147,45 +173,109 @@ export class EffectManager {
     };
   }
 
-  private async downloadOverlay(url: string): Promise<string> {
-    const parsedUrl = new URL(url);
-    const tempId = this.generateTempId();
-    const extension = path.extname(parsedUrl.pathname) || ".mp4";
-    const tempFileName = `overlay_${tempId}${extension}`;
-    const tempPath = path.join(this.config.tempDirPath, tempFileName);
+  private async processBannerEffect(effect: BannerOverlayEffect): Promise<ProcessedBannerEffect> {
+    let localPath: string;
+    let isVideo = true;
+    let publicUrl: string | undefined;
+    let staticBannerPath: string | undefined;
 
-    logger.debug({ url, tempPath }, "Downloading overlay file");
+    // Handle staticBannerPath (direct from effects cache)
+    if (effect.staticBannerPath) {
+      staticBannerPath = effect.staticBannerPath;
+      const staticDirPath = this.config.getStaticDirPath();
+      if (!staticDirPath) {
+        throw new Error("Static directory path is not configured");
+      }
+      localPath = path.join(staticDirPath, staticBannerPath);
+      if (!localPath) {
+        throw new Error("Failed to construct local path from staticBannerPath");
+      }
 
-    return new Promise<string>((resolve, reject) => {
-      const httpLib = parsedUrl.protocol === "https:" ? https : http;
-      
-      const request = httpLib.get(url, (response: http.IncomingMessage) => {
-        if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
-          return;
+      // Determine if it's a video based on extension
+      const ext = path.extname(localPath).toLowerCase();
+      if ([".mov"].includes(ext)) {
+        throw new Error(`Unsupported video format for banner overlays: ${ext}. Use MP4 only.`);
+      }
+      isVideo = [".mp4", ".webm", ".avi"].includes(ext);
+      if (isVideo && ext !== ".mp4") {
+        throw new Error(`Only MP4 video banners are allowed. Received: ${ext}`);
+      }
+      publicUrl = `/static/${staticBannerPath}`;
+    } else if (effect.bannerUrl) {
+      // Enforce: No HTTP/HTTPS; only local file URIs are allowed
+      if (effect.bannerUrl.startsWith("http://") || effect.bannerUrl.startsWith("https://")) {
+        throw new Error("HTTP/HTTPS banner URLs are not allowed. Provide local file (file://) or cached staticBannerPath.");
+      }
+
+      // Handle file:// local paths
+      if (effect.bannerUrl.startsWith("file://")) {
+        const filePath = effect.bannerUrl.replace("file://", "");
+        const tempId = this.generateTempId();
+        const extension = path.extname(filePath) || ".mp4";
+        const tempFileName = `banner_${tempId}${extension}`;
+        const tempPath = path.join(this.config.tempDirPath, tempFileName);
+        await fs.copy(filePath, tempPath);
+        this.tempFiles.push(tempPath);
+        localPath = tempPath;
+      } else {
+        throw new Error("Only local file banners are allowed (file://). Provide file:// or use staticBannerPath.");
+      }
+
+      // Determine if it's a video and enforce MP4-only
+      const ext = path.extname(localPath).toLowerCase();
+      if (ext === ".mov") {
+        throw new Error(".mov banners are not allowed. Convert to .mp4");
+      }
+      isVideo = [".mp4", ".webm", ".avi"].includes(ext);
+      if (isVideo && ext !== ".mp4") {
+        throw new Error(`Only MP4 video banners are allowed. Received: ${ext}`);
+      }
+
+      // Cache in stable directory
+      const cache = new OverlayCache(this.config);
+      const { localPath: cachedPath, publicUrl: cachedPublicUrl, staticEffectPath: cachedStaticPath } = await cache.put(localPath);
+      localPath = cachedPath;
+      publicUrl = cachedPublicUrl;
+      staticBannerPath = cachedStaticPath;
+    } else if (effect.bannerFile) {
+      localPath = await this.saveUploadedOverlay(effect.bannerFile);
+      isVideo = effect.bannerFile.mimeType.startsWith("video/");
+
+      // Enforce MP4-only for uploaded videos
+      if (isVideo) {
+        const ext = this.getExtensionFromMimeType(effect.bannerFile.mimeType);
+        if (ext !== ".mp4") {
+          throw new Error("Only MP4 video banners are allowed for uploads.");
         }
+      }
 
-        const fileStream = fs.createWriteStream(tempPath);
-        response.pipe(fileStream);
+      // Cache in stable directory
+      const cache = new OverlayCache(this.config);
+      const { localPath: cachedPath, publicUrl: cachedPublicUrl, staticEffectPath: cachedStaticPath } = await cache.put(localPath);
+      localPath = cachedPath;
+      publicUrl = cachedPublicUrl;
+      staticBannerPath = cachedStaticPath;
+    } else {
+      throw new Error("Either bannerUrl, bannerFile, or staticBannerPath must be provided for banner_overlay effect");
+    }
 
-        fileStream.on("finish", () => {
-          fileStream.close();
-          logger.debug({ tempPath }, "Overlay downloaded successfully");
-          this.tempFiles.push(tempPath);
-          resolve(tempPath);
-        });
-
-        fileStream.on("error", (err: Error) => {
-          fs.unlink(tempPath, () => {});
-          reject(err);
-        });
-      });
-
-      request.on("error", (err: Error) => {
-        fs.unlink(tempPath, () => {});
-        reject(err);
-      });
-    });
+    return {
+      type: "banner_overlay",
+      localPath,
+      publicUrl,
+      staticBannerPath,
+      chromakey: effect.chromakey ?? {
+        color: "0x00FF00",
+        similarity: 0.2,
+        blend: 0.2,
+      },
+      position: effect.position ?? {
+        x: 0,
+        y: 0,
+      },
+      duration: effect.duration,
+      isVideo,
+    };
   }
 
   private async saveUploadedOverlay(fileUpload: any): Promise<string> {
@@ -251,5 +341,134 @@ export class EffectManager {
     const timePart = Date.now().toString(36);
     return `${randomPart}${timePart}`;
   }
-}
 
+  // ========================================
+  // FFmpeg-based Overlay Methods
+  // ========================================
+
+  /**
+   * BLEND OVERLAY - VHS effects, light leaks, textures
+   *
+   * Uses FFmpeg blend filter with RGB color space conversion.
+   * Blends two videos together with adjustable opacity and blend mode.
+   *
+   * @param baseVideo - Path to base video
+   * @param overlayVideo - Path to overlay effect video
+   * @param blendMode - FFmpeg blend mode (addition, screen, overlay, multiply, average, lighten)
+   * @param opacity - Effect opacity (0.0 - 1.0)
+   * @param width - Video width (default: 1080)
+   * @param height - Video height (default: 1920)
+   * @returns Path to output video with blend effect applied
+   */
+  async applyBlendOverlay(
+    baseVideo: string,
+    overlayVideo: string,
+    blendMode: "addition" | "screen" | "overlay" | "multiply" | "average" | "lighten" = "addition",
+    opacity: number = 0.5,
+    width: number = 1080,
+    height: number = 1920
+  ): Promise<string> {
+    const outputPath = path.join(this.config.tempDirPath, `blend_${this.generateTempId()}.mp4`);
+
+    logger.info({
+      baseVideo,
+      overlayVideo,
+      blendMode,
+      opacity,
+      outputPath,
+    }, "Applying FFmpeg blend overlay");
+
+    const filterComplex = [
+      `[0:v]format=gbrp[base]`,
+      `[1:v]scale=${width}:${height},format=gbrp,loop=loop=0:size=32767[overlay]`,
+      `[base][overlay]blend=all_mode='${blendMode}':all_opacity=${opacity}:shortest=1,format=yuv420p[out]`
+    ].join(';');
+
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(baseVideo)
+        .input(overlayVideo)
+        .complexFilter(filterComplex)
+        .outputOptions(['-map', '[out]'])
+        .output(outputPath)
+        .on('start', (commandLine) => {
+          logger.debug({ commandLine }, "FFmpeg blend command started");
+        })
+        .on('progress', (progress) => {
+          logger.debug({ progress: progress.percent }, "FFmpeg blend progress");
+        })
+        .on('end', () => {
+          logger.info({ outputPath }, "FFmpeg blend overlay completed");
+          this.tempFiles.push(outputPath);
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          logger.error({ error: err.message }, "FFmpeg blend overlay failed");
+          reject(new Error(`FFmpeg blend overlay failed: ${err.message}`));
+        })
+        .run();
+    });
+  }
+
+  /**
+   * GREEN SCREEN CHROMAKEY - Advertising banners, logos
+   *
+   * Uses FFmpeg chromakey filter to remove green background (#00FF00).
+   * Banner remains 100% opaque, no mixing with base video.
+   *
+   * @param baseVideo - Path to base video
+   * @param bannerVideo - Path to banner video with green screen (#00FF00)
+   * @param similarity - How similar colors to remove (0.0 - 1.0, default: 0.2 aggressive)
+   * @param blend - Edge softness (0.0 - 1.0, default: 0.2)
+   * @param position - Banner position {x, y} (default: {0, 0} top-left)
+   * @returns Path to output video with banner overlay applied
+   */
+  async applyBannerChromakey(
+    baseVideo: string,
+    bannerVideo: string,
+    similarity: number = 0.2,
+    blend: number = 0.2,
+    position: { x: number; y: number } = { x: 0, y: 0 }
+  ): Promise<string> {
+    const outputPath = path.join(this.config.tempDirPath, `banner_${this.generateTempId()}.mp4`);
+
+    logger.info({
+      baseVideo,
+      bannerVideo,
+      similarity,
+      blend,
+      position,
+      outputPath,
+    }, "Applying FFmpeg chromakey banner");
+
+    const filterComplex = [
+      `[1:v]chromakey=0x00FF00:${similarity}:${blend}[banner]`,
+      `[0:v][banner]overlay=${position.x}:${position.y}[out]`
+    ].join(';');
+
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(baseVideo)
+        .input(bannerVideo)
+        .complexFilter(filterComplex)
+        .outputOptions(['-map', '[out]'])
+        .output(outputPath)
+        .on('start', (commandLine) => {
+          logger.debug({ commandLine }, "FFmpeg chromakey command started");
+        })
+        .on('progress', (progress) => {
+          logger.debug({ progress: progress.percent }, "FFmpeg chromakey progress");
+        })
+        .on('end', () => {
+          logger.info({ outputPath }, "FFmpeg chromakey banner completed");
+          this.tempFiles.push(outputPath);
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          logger.error({ error: err.message }, "FFmpeg chromakey banner failed");
+          reject(new Error(`FFmpeg chromakey banner failed: ${err.message}`));
+        })
+        .run();
+    });
+  }
+}

@@ -15,7 +15,6 @@ import {
   createCaptionPages,
   shortVideoSchema,
 } from "../utils";
-import { BlendOverlay } from "../../remotion/compositions/BlendOverlay";
 import { TextOverlay } from "../../remotion/compositions/TextOverlay";
 import { KenBurnsImage } from "../../remotion/compositions/KenBurnsImage";
 
@@ -111,22 +110,9 @@ export const LandscapeVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
               />
             )}
             <Audio src={audio.url} />
-            
-            {/* Blend Effects */}
-            {effects?.map((effect: any, effectIdx: number) => (
-              <BlendOverlay
-                key={`effect-${i}-${effectIdx}`}
-                overlayPath={effect.localPath}
-                staticEffectPath={effect.staticEffectPath}
-                publicUrl={effect.publicUrl}
-                blendMode={effect.blendMode}
-                opacity={effect.opacity}
-                isVideo={effect.isVideo}
-                duration={effect.duration}
-                sceneDuration={sceneDuration}
-              />
-            ))}
-            
+
+            {/* Effects are applied via FFmpeg post-processing (not in Remotion) */}
+
             {/* Text Overlays */}
             {textOverlays?.map((overlay: any, overlayIdx: number) => (
               <TextOverlay

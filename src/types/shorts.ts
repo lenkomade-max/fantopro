@@ -64,13 +64,16 @@ const mediaSourceSchema = z.union([
   fileMediaSchema,
 ]);
 
-// Blend effect configuration
+// Blend effect configuration (FFmpeg blend modes)
 export enum BlendModeEnum {
   normal = "normal",
+  addition = "addition",  // FFmpeg blend mode (replaces 'add')
   screen = "screen",
   multiply = "multiply",
   overlay = "overlay",
-  add = "add",
+  average = "average",   // FFmpeg: 50/50 mix
+  lighten = "lighten",   // FFmpeg: light leaks
+  add = "add",          // Legacy (deprecated, use 'addition')
 }
 
 const blendEffectSchema = z.object({
@@ -89,8 +92,32 @@ const blendEffectSchema = z.object({
   ]).optional().describe("Duration of the effect (default: full scene)"),
 });
 
-// For now, only blend effect is supported. More effect types can be added later.
-const effectSchema = blendEffectSchema;
+// Banner overlay effect configuration (Green screen chromakey)
+const bannerOverlayEffectSchema = z.object({
+  type: z.literal("banner_overlay"),
+  bannerUrl: z.string().url().optional().describe("URL to banner video/image with green screen"),
+  bannerFile: fileUploadSchema.optional().describe("Direct file upload for banner"),
+  staticBannerPath: z.string().optional().describe("Path to static banner in effects directory (e.g., effects/banner.mp4)"),
+  chromakey: z.object({
+    color: z.string().default("0x00FF00").describe("Chromakey color (default: green #00FF00)"),
+    similarity: z.number().min(0).max(1).default(0.2).describe("How similar colors to remove (0.0-1.0)"),
+    blend: z.number().min(0).max(1).default(0.2).describe("Edge softness (0.0-1.0)"),
+  }).optional().describe("Chromakey settings (default: green 0x00FF00, similarity 0.2, blend 0.2)"),
+  position: z.object({
+    x: z.number().default(0).describe("X position in pixels"),
+    y: z.number().default(0).describe("Y position in pixels"),
+  }).optional().describe("Banner position on screen (default: 0,0 top-left)"),
+  duration: z.union([
+    z.literal("full"),
+    z.object({
+      start: z.number().describe("Start time in seconds"),
+      end: z.number().describe("End time in seconds"),
+    }),
+  ]).optional().describe("Duration of the banner (default: full scene)"),
+});
+
+// Effect union: blend overlay (VHS effects) + banner overlay (green screen chromakey)
+const effectSchema = z.union([blendEffectSchema, bannerOverlayEffectSchema]);
 
 // Text overlay configuration
 export enum TextAnimationEnum {
@@ -163,6 +190,7 @@ export type SceneInput = z.infer<typeof sceneInput>;
 export type MediaSource = z.infer<typeof mediaSourceSchema>;
 export type FileUpload = z.infer<typeof fileUploadSchema>;
 export type BlendEffect = z.infer<typeof blendEffectSchema>;
+export type BannerOverlayEffect = z.infer<typeof bannerOverlayEffectSchema>;
 export type Effect = z.infer<typeof effectSchema>;
 export type TextOverlay = z.infer<typeof textOverlaySchema>;
 

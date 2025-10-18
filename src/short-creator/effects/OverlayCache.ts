@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import fs from "fs-extra";
 import path from "path";
 import { Config } from "../../config";
@@ -28,7 +27,7 @@ export class OverlayCache {
    */
   public async put(tempPath: string): Promise<{ localPath: string; publicUrl: string; staticEffectPath: string }> {
     const buffer = await fs.readFile(tempPath);
-    const hash = crypto.createHash("sha1").update(buffer).digest("hex");
+    const hash = this.simpleHash(buffer);
     const ext = path.extname(tempPath) || ".mp4";
     const cachedName = `${hash}${ext}`;
     const cachedPath = path.join(this.effectsDir, cachedName);
@@ -42,6 +41,18 @@ export class OverlayCache {
     const staticEffectPath = `effects/${cachedName}`;
     return { localPath: cachedPath, publicUrl, staticEffectPath };
   }
+
+  /**
+   * Simple hash function without crypto dependency
+   * Uses FNV-1a algorithm for fast, consistent hashing
+   */
+  private simpleHash(buffer: Buffer): string {
+    let hash = 2166136261; // FNV offset basis
+    for (let i = 0; i < buffer.length; i++) {
+      hash ^= buffer[i];
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    // Convert to hex string
+    return (hash >>> 0).toString(16).padStart(8, '0') + Date.now().toString(36);
+  }
 }
-
-

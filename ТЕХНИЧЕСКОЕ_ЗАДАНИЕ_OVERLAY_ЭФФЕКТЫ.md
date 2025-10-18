@@ -29,7 +29,7 @@
 #### 1. EffectManager.ts
 **Путь:** `/root/FantaProjekt/src/short-creator/effects/EffectManager.ts`
 - Обрабатывает эффекты и их пути
-- Проверяет локальные пути к файлам
+- Проверяет локальные пути к файлам   
 - Запрещает HTTP/HTTPS URLs и .mov файлы
 
 #### 2. BlendOverlay.tsx  

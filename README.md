@@ -2,15 +2,19 @@
 
 Автоматическая система создания коротких видеороликов (Shorts) для TikTok, Instagram Reels, YouTube Shorts.
 
-**Версия**: 1.0.0  
+**Версия**: 2.0.0 (обновлено 18.10.2025)
 **Основано на**: [short-video-maker](https://github.com/gyoridavid/short-video-maker)
+
+> 🎉 **Последнее обновление:** Интеграция FFmpeg post-processing для blend и chromakey эффектов!
+> 📖 **Изменения:** [FFMPEG_OVERLAY_GUIDE.md](FFMPEG_OVERLAY_GUIDE.md)
 
 ---
 
 ## ✨ Возможности
 
 - 🎬 **Множественные источники контента** - Pexels, URL, прямые файлы от N8N
-- 🎨 **Эффекты наложения** - VHS, снег, световые утечки, пользовательские
+- 🎨 **FFmpeg Blend эффекты** - VHS, снег, световые утечки (12+ blend modes: addition, overlay, multiply, screen, etc.)
+- 🎭 **FFmpeg Chromakey баннеры** - Зелёный экран (green screen) наложения с настройкой прозрачности
 - 📝 **Текстовые оверлеи** - статичные и анимированные
 - 🎵 **Автоозвучка** - Kokoro TTS (72+ голоса)
 - 📊 **Авто-субтитры** - Whisper с синхронизацией
@@ -73,25 +77,27 @@ curl -X POST http://localhost:3123/api/short-video \
 }
 ```
 
-### С эффектами и оверлеями:
+### С FFmpeg blend эффектами:
 ```json
 {
   "scenes": [{
-    "text": "Epic moment",
+    "text": "Epic moment with visual effects",
     "media": {
       "type": "url",
-      "url": "https://example.com/video.mp4"
+      "urls": ["https://example.com/video.mp4"]
     },
     "effects": [{
-      "type": "overlay",
-      "source": "vhs-glitch.mp4",
-      "blendMode": "overlay",
-      "opacity": 0.7
+      "type": "blend",
+      "staticEffectPath": "effects/VHS_01_small.mp4",
+      "blendMode": "addition",
+      "opacity": 0.5,
+      "duration": "full"
     }],
     "textOverlays": [{
       "text": "BREAKING NEWS",
-      "position": "top",
-      "style": { "fontSize": 60, "color": "#FF0000" }
+      "position": { "x": "center", "y": "top" },
+      "style": { "fontSize": 60, "color": "#FF0000" },
+      "animation": "fadeIn"
     }]
   }],
   "config": {
@@ -99,6 +105,26 @@ curl -X POST http://localhost:3123/api/short-video \
     "music": "dark",
     "orientation": "portrait"
   }
+}
+```
+
+### С chromakey баннером:
+```json
+{
+  "scenes": [{
+    "text": "Check out our amazing product",
+    "searchTerms": ["technology", "modern"],
+    "effects": [{
+      "type": "banner_overlay",
+      "staticBannerPath": "banner/greenscreenBanner.mp4",
+      "chromakey": {
+        "color": "0x00FF00",
+        "similarity": 0.4,
+        "blend": 0.1
+      },
+      "position": { "x": 0, "y": 0 }
+    }]
+  }]
 }
 ```
 

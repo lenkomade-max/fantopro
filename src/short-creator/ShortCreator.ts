@@ -6,7 +6,6 @@ import path from "path";
 
 import { Kokoro } from "./libraries/Kokoro";
 import { Remotion } from "./libraries/Remotion";
-import { OverlayRemotion } from "./libraries/OverlayRemotion";
 import { Whisper } from "./libraries/Whisper";
 import { FFMpeg } from "./libraries/FFmpeg";
 import { PexelsAPI } from "./libraries/Pexels";
@@ -15,7 +14,6 @@ import { logger } from "../logger";
 import { MusicManager } from "./music";
 import { ContentSourceFactory } from "./libraries/ContentSource";
 import { EffectManager } from "./effects/EffectManager";
-import { OverlayRenderer } from "../remotion/services/OverlayRenderer";
 import type {
   SceneInput,
   RenderConfig,
@@ -112,6 +110,7 @@ export class ShortCreator {
     const tempFiles: string[] = [];
     const contentSources: Array<{ cleanup?: () => Promise<void> }> = [];
     const effectManagers: EffectManager[] = [];
+    const allProcessedEffects: any[] = []; // Collect all effects for FFmpeg post-processing
 
     const orientation: OrientationEnum =
       config.orientation || OrientationEnum.portrait;
@@ -190,6 +189,8 @@ export class ShortCreator {
           const sceneEffectManager = new EffectManager(this.config);
           processedEffects = await sceneEffectManager.processEffects(scene.effects);
           effectManagers.push(sceneEffectManager);
+          // Collect effects for FFmpeg post-processing
+          allProcessedEffects.push(...processedEffects);
           logger.debug({ effectCount: processedEffects.length }, "Processed scene effects");
         }
 
@@ -203,21 +204,21 @@ export class ShortCreator {
           },
         };
 
-        // Add effects if processed
+        // Don't add effects to sceneData - they will be applied via FFmpeg post-processing
         if (processedEffects && processedEffects.length > 0) {
-          sceneData.effects = processedEffects;
+          // sceneData.effects = processedEffects;  // DISABLED - effects via FFmpeg
           logger.debug(
             {
               sceneIndex: index,
               effectCount: processedEffects.length,
               effects: processedEffects.map(e => ({
                 type: e.type,
-                staticEffectPath: e.staticEffectPath,
+                localPath: e.localPath,
                 blendMode: e.blendMode,
                 opacity: e.opacity
               }))
             },
-            "Added processed effects to scene"
+            "Effects will be applied via FFmpeg post-processing (not in Remotion)"
           );
         }
 
@@ -276,139 +277,100 @@ export class ShortCreator {
         "Scene data before overlay detection"
       );
 
-      // Detect overlays and determine renderer with enhanced error handling
-      let overlayDetection;
-      try {
-        logger.info({ videoId }, "Creating OverlayRenderer instance");
-        const overlayRenderer = new OverlayRenderer(this.effectManager);
-        
-        logger.info({ videoId, sceneCount: scenes.length }, "Starting overlay detection");
-        overlayDetection = await overlayRenderer.detectOverlays(scenes);
-        
-        logger.info(
-          {
-            overlayDetection,
-            videoId,
-            sceneCount: scenes.length,
-            hasEffects: scenes.some(s => (s as any).effects && (s as any).effects.length > 0),
-            totalEffects: scenes.reduce((sum, s) => sum + ((s as any).effects?.length || 0), 0),
-          },
-          "Overlay detection complete"
-        );
-      } catch (overlayError) {
-        logger.error(
-          {
-            error: overlayError,
-            videoId,
-            sceneCount: scenes.length,
-            hasEffects: scenes.some(s => (s as any).effects && (s as any).effects.length > 0),
-            totalEffects: scenes.reduce((sum, s) => sum + ((s as any).effects?.length || 0), 0),
-          },
-          "Overlay detection failed, falling back to standard renderer"
-        );
-        
-        // Fallback to standard renderer
-        overlayDetection = {
-          hasOverlays: false,
-          overlayCount: 0,
-          effects: [],
-          recommendedRenderer: "standard" as const,
-          reason: "Overlay detection failed, using fallback",
-        };
-      }
+      // ========================================
+      // IMPORTANT: Always use standard renderer WITHOUT effects
+      // Effects will be applied via FFmpeg post-processing
+      // ========================================
+      logger.info({ videoId, effectCount: allProcessedEffects.length }, "Using standard renderer (effects via FFmpeg post-processing)");
 
-      // Choose renderer based on detection
-      if (overlayDetection.recommendedRenderer === "overlay") {
-        logger.info(
-          {
-            reason: overlayDetection.reason,
-            overlayCount: overlayDetection.overlayCount,
-            videoId,
+      // Use standard Remotion renderer (NO effects in Remotion)
+      await this.remotion.render(
+        {
+          music: selectedMusic,
+          scenes,
+          config: {
+            durationMs: totalDuration * 1000,
+            paddingBack: config.paddingBack,
+            captionBackgroundColor: config.captionBackgroundColor,
+            captionPosition: config.captionPosition,
+            musicVolume: config.musicVolume,
           },
-          "Using overlay renderer for enhanced stability"
-        );
+        },
+        videoId,
+        orientation,
+      );
 
-        // Initialize overlay-specific Remotion instance
-        let overlayModuleRendered = false;
-        try {
-          logger.info({ videoId }, "Using overlay-effects module for rendering");
-          // Lazy require new module facade to avoid NodeNext extension issues
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const { OverlayEffects } = require("../../packages/overlay-effects/src/overlay-effects");
-          await OverlayEffects.render(
-            this.config,
-            {
-              music: selectedMusic,
-              scenes,
-              config: {
-                durationMs: totalDuration * 1000,
-                paddingBack: config.paddingBack,
-                captionBackgroundColor: config.captionBackgroundColor,
-                captionPosition: config.captionPosition,
-                musicVolume: config.musicVolume,
-              },
-            },
-            videoId,
-            orientation,
+      // ========================================
+      // FFmpeg Post-Processing (Blend + Chromakey)
+      // ========================================
+      if (allProcessedEffects.length > 0) {
+        logger.info({ videoId, effectCount: allProcessedEffects.length }, "Starting FFmpeg post-processing");
+
+        let currentVideoPath = this.getVideoPath(videoId);
+
+        // Separate effects by type
+        const blendEffects = allProcessedEffects.filter(e => e.type === "blend");
+        const bannerEffects = allProcessedEffects.filter(e => e.type === "banner_overlay");
+
+        // Apply blend overlays first
+        for (const effect of blendEffects) {
+          logger.info({
+            blendMode: effect.blendMode,
+            opacity: effect.opacity,
+            overlayPath: effect.localPath
+          }, "Applying FFmpeg blend overlay");
+
+          const outputPath = await this.effectManager.applyBlendOverlay(
+            currentVideoPath,
+            effect.localPath,
+            effect.blendMode,
+            effect.opacity,
+            orientation === OrientationEnum.portrait ? 1080 : 1920,
+            orientation === OrientationEnum.portrait ? 1920 : 1080
           );
-          overlayModuleRendered = true;
-          logger.info({ videoId }, "overlay-effects module render completed");
-        } catch (initError) {
-          logger.error(
-            { error: initError, videoId },
-            "overlay-effects module failed, falling back to standard renderer"
-          );
-          // Fallback to standard renderer
-          await this.remotion.render(
-            {
-              music: selectedMusic,
-              scenes,
-              config: {
-                durationMs: totalDuration * 1000,
-                paddingBack: config.paddingBack,
-                captionBackgroundColor: config.captionBackgroundColor,
-                captionPosition: config.captionPosition,
-                musicVolume: config.musicVolume,
-              },
-            },
-            videoId,
-            orientation,
-          );
-          return videoId; // Exit early since we fell back to standard renderer
-        }
-        if (!overlayModuleRendered) {
-          // Safety net already handled in catch, but keep branch structure intact
+
+          // Replace original with blended version
+          if (currentVideoPath !== this.getVideoPath(videoId)) {
+            // Clean up intermediate file
+            fs.removeSync(currentVideoPath);
+          }
+          currentVideoPath = outputPath;
+
+          logger.info({ outputPath }, "Blend overlay applied successfully");
         }
 
-        // Cleanup overlay renderer
-        try {
-          const overlayRenderer = new OverlayRenderer(this.effectManager);
-          await overlayRenderer.cleanup();
-        } catch (cleanupError) {
-          logger.warn({ error: cleanupError, videoId }, "Failed to cleanup overlay renderer");
-        }
-      } else {
-        logger.info(
-          { reason: overlayDetection.reason, videoId },
-          "Using standard renderer"
-        );
+        // Apply banner chromakey overlays second (after blend)
+        for (const effect of bannerEffects) {
+          logger.info({
+            chromakey: effect.chromakey,
+            position: effect.position,
+            bannerPath: effect.localPath
+          }, "Applying FFmpeg banner chromakey");
 
-        // Use standard Remotion renderer
-        await this.remotion.render(
-          {
-            music: selectedMusic,
-            scenes,
-            config: {
-              durationMs: totalDuration * 1000,
-              paddingBack: config.paddingBack,
-              captionBackgroundColor: config.captionBackgroundColor,
-              captionPosition: config.captionPosition,
-              musicVolume: config.musicVolume,
-            },
-          },
-          videoId,
-          orientation,
-        );
+          const outputPath = await this.effectManager.applyBannerChromakey(
+            currentVideoPath,
+            effect.localPath,
+            effect.chromakey.similarity,
+            effect.chromakey.blend,
+            effect.position
+          );
+
+          // Replace original with chromakeyed version
+          if (currentVideoPath !== this.getVideoPath(videoId)) {
+            // Clean up intermediate file
+            fs.removeSync(currentVideoPath);
+          }
+          currentVideoPath = outputPath;
+
+          logger.info({ outputPath }, "Banner chromakey applied successfully");
+        }
+
+        // Replace final video
+        const finalVideoPath = this.getVideoPath(videoId);
+        if (currentVideoPath !== finalVideoPath) {
+          await fs.move(currentVideoPath, finalVideoPath, { overwrite: true });
+          logger.info({ finalVideoPath }, "FFmpeg post-processing complete, final video saved");
+        }
       }
     } finally {
       // Cleanup temp files
