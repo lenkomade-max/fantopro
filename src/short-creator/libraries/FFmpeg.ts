@@ -90,4 +90,81 @@ export class FFMpeg {
         });
     });
   }
+
+  /**
+   * Change audio speed using FFmpeg atempo filter
+   * @param audio - Input audio buffer
+   * @param speed - Speed multiplier (1.0-1.5, where 1.0 = normal speed)
+   * @returns Modified audio buffer with changed speed
+   */
+  async changeAudioSpeed(
+    audio: ArrayBuffer,
+    speed: number = 1.0,
+  ): Promise<ArrayBuffer> {
+    // If speed is 1.0, return original audio (no processing needed)
+    if (speed === 1.0) {
+      logger.debug("Speed is 1.0, skipping audio speed change");
+      return audio;
+    }
+
+    // Validate speed range (atempo filter supports 0.5-2.0, we limit to 1.0-1.5)
+    if (speed < 1.0 || speed > 1.5) {
+      logger.warn({ speed }, "Speed out of range (1.0-1.5), clamping");
+      speed = Math.max(1.0, Math.min(1.5, speed));
+    }
+
+    logger.debug({ speed }, "Changing audio speed with atempo filter");
+
+    const inputStream = new Readable();
+    inputStream.push(Buffer.from(audio));
+    inputStream.push(null);
+
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let hasError = false;
+
+      const command = ffmpeg()
+        .input(inputStream)
+        .audioFilters(`atempo=${speed}`)
+        .audioCodec("pcm_s16le")
+        .audioChannels(2)
+        .toFormat("wav")
+        .on("error", (err) => {
+          if (hasError) return; // Prevent double error handling
+          hasError = true;
+          logger.error({ err, speed }, "Error changing audio speed");
+
+          // If stream closed error, return original audio
+          if (err.message && err.message.includes("Output stream closed")) {
+            logger.warn({ speed }, "Stream closed during speed change, using original audio");
+            resolve(audio);
+          } else {
+            reject(err);
+          }
+        });
+
+      const outputStream = command.pipe();
+
+      outputStream
+        .on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        })
+        .on("end", () => {
+          if (hasError) return; // Don't resolve if error already handled
+
+          const buffer = Buffer.concat(chunks);
+          logger.debug({ speed, originalSize: audio.byteLength, newSize: buffer.length }, "Audio speed change complete");
+          resolve(buffer.buffer);
+        })
+        .on("error", (err) => {
+          if (hasError) return; // Prevent double error handling
+          hasError = true;
+          logger.error({ err, speed }, "Stream error changing audio speed");
+
+          // Fallback to original audio on stream errors
+          logger.warn({ speed }, "Stream error, using original audio");
+          resolve(audio);
+        });
+    });
+  }
 }

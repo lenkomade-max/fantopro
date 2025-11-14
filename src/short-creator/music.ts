@@ -192,6 +192,42 @@ export class MusicManager {
       end: 95,
       mood: MusicMoodEnum.dark,
     },
+    {
+      file: "crime_anepic.mp3",
+      start: 0,
+      end: 134,
+      mood: MusicMoodEnum.crime_anepic,
+    },
+    {
+      file: "crime_darkhorror.mp3",
+      start: 0,
+      end: 152,
+      mood: MusicMoodEnum.crime_darkhorror,
+    },
+    {
+      file: "crime_disturbance.mp3",
+      start: 0,
+      end: 137,
+      mood: MusicMoodEnum.crime_disturbance,
+    },
+    {
+      file: "crime_dronesystem.mp3",
+      start: 0,
+      end: 137,
+      mood: MusicMoodEnum.crime_dronesystem,
+    },
+    {
+      file: "crime_drone_system_stalker.mp3",
+      start: 0,
+      end: 200,
+      mood: MusicMoodEnum.crime_drone_system_stalker,
+    },
+    {
+      file: "crime_new_report.mp3",
+      start: 0,
+      end: 212,
+      mood: MusicMoodEnum.crime_new_report,
+    },
   ];
 
   constructor(private config: Config) {}

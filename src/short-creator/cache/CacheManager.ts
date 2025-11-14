@@ -14,7 +14,7 @@ export class CacheManager {
   private cacheDir: string;
 
   constructor(private config: Config) {
-    this.cacheDir = path.join(config.videosDirPath, ".cache");
+    this.cacheDir = config.cacheDirPath;
     this.ensureCacheDir();
   }
 

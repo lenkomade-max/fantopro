@@ -10,28 +10,55 @@ import { APIRouter } from "./routers/rest";
 import { MCPRouter } from "./routers/mcp";
 import { logger } from "../logger";
 import { Config } from "../config";
+import { VideoAnalyzer } from "../video-analyzer/VideoAnalyzer";
+import videoAnalyzerRouter from "./routers/video-analyzer";
+import { initVideoAnalyzerRouter } from "./routers/video-analyzer";
+import { HealthChecker } from "../monitoring";
 
 export class Server {
   private app: express.Application;
   private config: Config;
+  private healthChecker?: HealthChecker;
 
-  constructor(config: Config, shortCreator: ShortCreator) {
+  constructor(
+    config: Config,
+    shortCreator: ShortCreator,
+    videoAnalyzer?: VideoAnalyzer,
+    healthChecker?: HealthChecker
+  ) {
     this.config = config;
+    this.healthChecker = healthChecker;
     this.app = express();
 
     // Increase payload size limit for large photo uploads
-    this.app.use(express.json({ limit: '50mb' }));
-    this.app.use(express.urlencoded({ limit: '50mb', extended: true }));
+    this.app.use(express.json({ limit: '150mb' }));
+    this.app.use(express.urlencoded({ limit: '150mb', extended: true }));
 
-    // add healthcheck endpoint
-    this.app.get("/health", (req: ExpressRequest, res: ExpressResponse) => {
-      res.status(200).json({ status: "ok" });
+    // Enhanced health check endpoint
+    this.app.get("/health", (_req: ExpressRequest, res: ExpressResponse) => {
+      if (this.healthChecker) {
+        const health = this.healthChecker.getHealthStatus();
+        const statusCode = health.status === 'healthy' ? 200 : 503;
+        res.status(statusCode).json(health);
+      } else {
+        // Fallback to simple health check
+        res.status(200).json({ status: "ok" });
+      }
     });
 
     const apiRouter = new APIRouter(config, shortCreator);
     const mcpRouter = new MCPRouter(shortCreator);
     this.app.use("/api", apiRouter.router);
     this.app.use("/mcp", mcpRouter.router);
+
+    // Video Analyzer router (optional)
+    if (videoAnalyzer) {
+      logger.info("Initializing Video Analyzer API routes");
+      const analyzerRouter = initVideoAnalyzerRouter(videoAnalyzer);
+      this.app.use("/api/video-analyzer", analyzerRouter);
+    } else {
+      logger.info("Video Analyzer is disabled");
+    }
 
     // Serve static files from the UI build
     this.app.use(express.static(path.join(__dirname, "../../dist/ui")));
@@ -48,7 +75,7 @@ export class Server {
     );
 
     // Serve the React app for all other routes (must be last)
-    this.app.get("*", (req: ExpressRequest, res: ExpressResponse) => {
+    this.app.get("*", (_req: ExpressRequest, res: ExpressResponse) => {
       res.sendFile(path.join(__dirname, "../../dist/ui/index.html"));
     });
   }

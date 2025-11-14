@@ -14,6 +14,7 @@ import { logger } from "../logger";
 import { MusicManager } from "./music";
 import { ContentSourceFactory } from "./libraries/ContentSource";
 import { EffectManager } from "./effects/EffectManager";
+import type { AlertManager, ProcessMonitor } from "../monitoring";
 import type {
   SceneInput,
   RenderConfig,
@@ -32,6 +33,9 @@ export class ShortCreator {
   }[] = [];
   private contentSourceFactory: ContentSourceFactory;
   private effectManager: EffectManager;
+  private progressMap: Map<string, { progress: number; stage: string }> = new Map();
+  private alertManager?: AlertManager;
+  private processMonitor?: ProcessMonitor;
 
   constructor(
     private config: Config,
@@ -41,20 +45,49 @@ export class ShortCreator {
     private ffmpeg: FFMpeg,
     private pexelsApi: PexelsAPI,
     private musicManager: MusicManager,
+    alertManager?: AlertManager,
   ) {
     this.contentSourceFactory = new ContentSourceFactory(config, pexelsApi);
     this.effectManager = new EffectManager(config);
+    this.alertManager = alertManager;
   }
 
-  public status(id: string): VideoStatus {
+  /**
+   * Set process monitor (called after ShortCreator creation)
+   */
+  public setProcessMonitor(processMonitor: ProcessMonitor): void {
+    this.processMonitor = processMonitor;
+  }
+
+  public status(id: string): { status: VideoStatus; progress?: number; stage?: string } {
     const videoPath = this.getVideoPath(id);
+    const progressInfo = this.progressMap.get(id);
+
     if (this.queue.find((item) => item.id === id)) {
-      return "processing";
+      return {
+        status: "processing",
+        progress: progressInfo?.progress || 0,
+        stage: progressInfo?.stage || "Initializing..."
+      };
     }
     if (fs.existsSync(videoPath)) {
-      return "ready";
+      // Clean up progress info for completed videos
+      this.progressMap.delete(id);
+      return { status: "ready", progress: 100 };
     }
-    return "failed";
+    // Clean up progress info for failed videos
+    this.progressMap.delete(id);
+    return { status: "failed", progress: 0 };
+  }
+
+  private updateProgress(id: string, progress: number, stage: string): void {
+    this.progressMap.set(id, { progress: Math.min(100, Math.max(0, progress)), stage });
+    logger.debug({ videoId: id, progress, stage }, "Progress updated");
+
+    // Update ProcessMonitor if available
+    if (this.processMonitor) {
+      this.processMonitor.updateProcess(id, progress, stage, 'processing');
+    }
   }
 
   public addToQueue(sceneInput: SceneInput[], config: RenderConfig): string {
@@ -65,6 +98,19 @@ export class ShortCreator {
       config,
       id,
     });
+
+    // Register process in monitor
+    if (this.processMonitor) {
+      this.processMonitor.registerProcess(id);
+    }
+
+    // Отправить уведомление о новом запросе
+    if (this.alertManager) {
+      this.alertManager.sendVideoRequestReceived(id, sceneInput.length).catch((error) => {
+        logger.error(error, 'Failed to send video request notification');
+      });
+    }
+
     if (this.queue.length === 1) {
       this.processQueue();
     }
@@ -82,10 +128,38 @@ export class ShortCreator {
       "Processing video item in the queue",
     );
     try {
-      await this.createShort(id, sceneInput, config);
+      const duration = await this.createShort(id, sceneInput, config);
       logger.debug({ id }, "Video created successfully");
+
+      // Mark process as completed in monitor
+      if (this.processMonitor) {
+        this.processMonitor.updateProcess(id, 100, 'Completed', 'completed');
+        this.processMonitor.removeProcess(id);
+      }
+
+      // Отправить уведомление об успешном создании
+      if (this.alertManager) {
+        this.alertManager.sendVideoCreated(id, duration, sceneInput.length).catch((error) => {
+          logger.error(error, 'Failed to send video created notification');
+        });
+      }
     } catch (error: unknown) {
       logger.error(error, "Error creating video");
+
+      // Mark process as failed in monitor
+      if (this.processMonitor) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        this.processMonitor.updateProcess(id, 0, `Failed: ${errorMsg}`, 'failed');
+        this.processMonitor.removeProcess(id);
+      }
+
+      // Отправить уведомление об ошибке
+      if (this.alertManager) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.alertManager.sendVideoCreationFailed(id, err, sceneInput.length).catch((alertError) => {
+          logger.error(alertError, 'Failed to send video creation failed notification');
+        });
+      }
     } finally {
       this.queue.shift();
       this.processQueue();
@@ -96,7 +170,7 @@ export class ShortCreator {
     videoId: string,
     inputScenes: SceneInput[],
     config: RenderConfig,
-  ): Promise<string> {
+  ): Promise<number> {
     logger.debug(
       {
         inputScenes,
@@ -104,6 +178,10 @@ export class ShortCreator {
       },
       "Creating short video",
     );
+
+    // Initialize progress
+    this.updateProgress(videoId, 0, "Starting video creation...");
+
     const scenes: any[] = [];
     let totalDuration = 0;
     const excludeVideoIds: string[] = [];
@@ -115,15 +193,30 @@ export class ShortCreator {
     const orientation: OrientationEnum =
       config.orientation || OrientationEnum.portrait;
 
+    const totalScenes = inputScenes.length;
     let index = 0;
     for (const scene of inputScenes) {
       try {
+        // Progress: 0-30% for TTS generation
+        const ttsProgress = (index / totalScenes) * 30;
+        this.updateProgress(videoId, ttsProgress, `Generating voice for scene ${index + 1}/${totalScenes}...`);
+
         const audio = await this.kokoro.generate(
           scene.text,
           config.voice ?? "af_heart",
         );
         let { audioLength } = audio;
-        const { audio: audioStream } = audio;
+        let { audio: audioStream } = audio;
+
+        // Apply voice speed change if specified (1.0-1.5x)
+        const voiceSpeed = config.voiceSpeed ?? 1.0;
+        if (voiceSpeed !== 1.0) {
+          logger.info({ voiceSpeed, scene: index + 1 }, "Applying voice speed change");
+          audioStream = await this.ffmpeg.changeAudioSpeed(audioStream, voiceSpeed);
+          // Adjust audio length based on speed (faster = shorter duration)
+          audioLength = audioLength / voiceSpeed;
+          logger.debug({ originalLength: audioLength * voiceSpeed, newLength: audioLength, voiceSpeed }, "Audio length adjusted for speed");
+        }
 
         // add the paddingBack in seconds to the last scene
         if (index + 1 === inputScenes.length && config.paddingBack) {
@@ -138,8 +231,17 @@ export class ShortCreator {
         tempFiles.push(tempWavPath, tempMp3Path);
 
         await this.ffmpeg.saveNormalizedAudio(audioStream, tempWavPath);
+
+        // Progress: 30-40% for subtitles generation
+        const subtitlesProgress = 30 + (index / totalScenes) * 10;
+        this.updateProgress(videoId, subtitlesProgress, `Generating subtitles for scene ${index + 1}/${totalScenes}...`);
+
         const captions = await this.whisper.CreateCaption(tempWavPath);
         await this.ffmpeg.saveToMp3(audioStream, tempMp3Path);
+
+        // Progress: 40-50% for media acquisition
+        const mediaProgress = 40 + (index / totalScenes) * 10;
+        this.updateProgress(videoId, mediaProgress, `Getting media for scene ${index + 1}/${totalScenes}...`);
 
         // Determine content source (backward compatibility)
         let contentSource;
@@ -168,20 +270,49 @@ export class ShortCreator {
           throw new Error("No media files returned from content source");
         }
 
-        // Use the first media file for now (multi-media support will come later)
-        const primaryMedia = mediaFiles[0];
-        logger.debug(
-          { mediaFile: primaryMedia.filename, source: scene.media?.type || "pexels-legacy" },
-          "Using media file for scene",
-        );
+        // Check if mediaDuration is specified (multi-media looping support)
+        const useMultiMedia = scene.mediaDuration !== undefined;
 
-        // Copy to temp location with expected filename for serving
-        const tempVideoFileName = `${tempId}${path.extname(primaryMedia.filename)}`;
-        const tempVideoPath = path.join(this.config.tempDirPath, tempVideoFileName);
-        
-        // Copy the media file to temp location
-        await fs.copy(primaryMedia.localPath, tempVideoPath);
-        tempFiles.push(tempVideoPath);
+        let mediaUrls: string[] = [];
+
+        if (useMultiMedia) {
+          // NEW: Multi-media support with looping
+          logger.debug(
+            {
+              mediaCount: mediaFiles.length,
+              mediaDuration: scene.mediaDuration,
+              source: scene.media?.type || "pexels-legacy"
+            },
+            "Using multi-media mode with looping",
+          );
+
+          // Copy all media files to temp location
+          for (let i = 0; i < mediaFiles.length; i++) {
+            const mediaFile = mediaFiles[i];
+            const tempMediaFileName = `${tempId}_${i}${path.extname(mediaFile.filename)}`;
+            const tempMediaPath = path.join(this.config.tempDirPath, tempMediaFileName);
+
+            await fs.copy(mediaFile.localPath, tempMediaPath);
+            tempFiles.push(tempMediaPath);
+
+            mediaUrls.push(`http://localhost:${this.config.port}/api/tmp/${tempMediaFileName}`);
+          }
+        } else {
+          // LEGACY: Use only the first media file
+          const primaryMedia = mediaFiles[0];
+          logger.debug(
+            { mediaFile: primaryMedia.filename, source: scene.media?.type || "pexels-legacy" },
+            "Using single media file for scene",
+          );
+
+          const tempVideoFileName = `${tempId}${path.extname(primaryMedia.filename)}`;
+          const tempVideoPath = path.join(this.config.tempDirPath, tempVideoFileName);
+
+          await fs.copy(primaryMedia.localPath, tempVideoPath);
+          tempFiles.push(tempVideoPath);
+
+          mediaUrls.push(`http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`);
+        }
 
         // Process effects if any
         let processedEffects: any[] | undefined;
@@ -197,12 +328,19 @@ export class ShortCreator {
         // Build scene object
         const sceneData: any = {
           captions,
-          video: `http://localhost:${this.config.port}/api/tmp/${tempVideoFileName}`,
           audio: {
             url: `http://localhost:${this.config.port}/api/tmp/${tempMp3FileName}`,
             duration: audioLength,
           },
         };
+
+        // Add media URLs based on mode
+        if (useMultiMedia) {
+          sceneData.videos = mediaUrls;
+          sceneData.mediaDuration = scene.mediaDuration;
+        } else {
+          sceneData.video = mediaUrls[0];
+        }
 
         // Don't add effects to sceneData - they will be applied via FFmpeg post-processing
         if (processedEffects && processedEffects.length > 0) {
@@ -226,6 +364,12 @@ export class ShortCreator {
         if (scene.textOverlays && scene.textOverlays.length > 0) {
           sceneData.textOverlays = scene.textOverlays;
           logger.debug({ overlayCount: scene.textOverlays.length }, "Added text overlays to scene");
+        }
+
+        // Add advanced text overlays if any (multi-color/multi-style text)
+        if (scene.advancedTextOverlays && scene.advancedTextOverlays.length > 0) {
+          sceneData.advancedTextOverlays = scene.advancedTextOverlays;
+          logger.debug({ overlayCount: scene.advancedTextOverlays.length }, "Added advanced text overlays to scene");
         }
 
         scenes.push(sceneData);
@@ -283,6 +427,9 @@ export class ShortCreator {
       // ========================================
       logger.info({ videoId, effectCount: allProcessedEffects.length }, "Using standard renderer (effects via FFmpeg post-processing)");
 
+      // Progress: 50-85% for Remotion rendering
+      this.updateProgress(videoId, 50, "Rendering video with Remotion...");
+
       // Use standard Remotion renderer (NO effects in Remotion)
       await this.remotion.render(
         {
@@ -300,20 +447,29 @@ export class ShortCreator {
         orientation,
       );
 
+      this.updateProgress(videoId, 85, "Remotion rendering complete!");
+
       // ========================================
       // FFmpeg Post-Processing (Blend + Chromakey)
       // ========================================
       if (allProcessedEffects.length > 0) {
         logger.info({ videoId, effectCount: allProcessedEffects.length }, "Starting FFmpeg post-processing");
+        this.updateProgress(videoId, 85, "Applying visual effects...");
 
         let currentVideoPath = this.getVideoPath(videoId);
 
         // Separate effects by type
         const blendEffects = allProcessedEffects.filter(e => e.type === "blend");
         const bannerEffects = allProcessedEffects.filter(e => e.type === "banner_overlay");
+        const totalEffects = blendEffects.length + bannerEffects.length;
+        let effectIndex = 0;
 
         // Apply blend overlays first
         for (const effect of blendEffects) {
+          effectIndex++;
+          const effectProgress = 85 + ((effectIndex / totalEffects) * 10);
+          this.updateProgress(videoId, effectProgress, `Applying effect ${effectIndex}/${totalEffects}...`);
+
           logger.info({
             blendMode: effect.blendMode,
             opacity: effect.opacity,
@@ -341,6 +497,10 @@ export class ShortCreator {
 
         // Apply banner chromakey overlays second (after blend)
         for (const effect of bannerEffects) {
+          effectIndex++;
+          const effectProgress = 85 + ((effectIndex / totalEffects) * 10);
+          this.updateProgress(videoId, effectProgress, `Applying banner ${effectIndex}/${totalEffects}...`);
+
           logger.info({
             chromakey: effect.chromakey,
             position: effect.position,
@@ -352,7 +512,9 @@ export class ShortCreator {
             effect.localPath,
             effect.chromakey.similarity,
             effect.chromakey.blend,
-            effect.position
+            effect.position,
+            effect.duration,
+            orientation
           );
 
           // Replace original with chromakeyed version
@@ -371,7 +533,15 @@ export class ShortCreator {
           await fs.move(currentVideoPath, finalVideoPath, { overwrite: true });
           logger.info({ finalVideoPath }, "FFmpeg post-processing complete, final video saved");
         }
+
+        this.updateProgress(videoId, 95, "Effects applied successfully!");
+      } else {
+        // No effects, skip to finalization
+        this.updateProgress(videoId, 95, "Finalizing video...");
       }
+
+      // Final progress update
+      this.updateProgress(videoId, 100, "Video complete!");
     } finally {
       // Cleanup temp files
       for (const file of tempFiles) {
@@ -403,7 +573,7 @@ export class ShortCreator {
       }
     }
 
-    return videoId;
+    return totalDuration;
   }
 
   public getVideoPath(videoId: string): string {

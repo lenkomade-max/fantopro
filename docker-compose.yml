@@ -3,23 +3,50 @@ version: '3.8'
 services:
   fantaprojekt:
     container_name: fantaprojekt
-    image: node:18-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fantaprojekt:latest
     restart: unless-stopped
-    working_dir: /app
-    volumes:
-      - .:/app
-      - /root/FantaProjekt/node_modules:/app/node_modules
     ports:
       - "3123:3123"
     environment:
+      - NODE_ENV=production
       - PORT=3123
       - LOG_LEVEL=info
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
-    command: node dist/index.js
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - LIBS_DIR_PATH=/app/fantaprojekt-libs
+      - WORKSPACE_DIR_PATH=/app/workspace
+      # NOTE: DOCKER=true NOT set - allows Whisper to install on first run
+      # Whisper compiles for container's GLIBC version automatically
+      # Monitoring & Alerts
+      - MONITORING_ENABLED=${MONITORING_ENABLED:-false}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    volumes:
+      # Persist Whisper and other libs (Whisper installs on first run)
+      - whisper-models:/app/fantaprojekt-libs/libs
+      # Persist workspace (temp, renders, cache, downloads)
+      - workspace-data:/app/workspace
+      # Optional: mount .env file for secrets
+      - ./.env:/app/.env:ro
     networks:
       - root_default
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3123/api/voices', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); })"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
 networks:
   root_default:
     external: true
+
+volumes:
+  whisper-models:
+    driver: local
+  workspace-data:
+    driver: local
 

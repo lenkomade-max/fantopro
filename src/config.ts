@@ -1,6 +1,5 @@
 import path from "path";
 import "dotenv/config";
-import os from "os";
 import fs from "fs-extra";
 import pino from "pino";
 import { kokoroModelPrecision, whisperModels } from "./types/shorts";
@@ -29,12 +28,15 @@ export const logger = pino({
 export class Config {
   private dataDirPath: string;
   private libsDirPath: string;
+  private workspaceDirPath: string;
   private staticDirPath: string;
 
   public installationSuccessfulPath: string;
   public whisperInstallPath: string;
   public videosDirPath: string;
   public tempDirPath: string;
+  public cacheDirPath: string;
+  public downloadsDirPath: string;
   public packageDirPath: string;
   public musicDirPath: string;
   public pexelsApiKey: string;
@@ -52,25 +54,39 @@ export class Config {
   public videoCacheSizeInBytes: number | null = null;
 
   constructor() {
-    this.dataDirPath =
-      process.env.DATA_DIR_PATH ||
-      path.join(os.homedir(), ".ai-agents-az-video-generator");
-    this.libsDirPath = path.join(this.dataDirPath, "libs");
+    // Project root directory
+    this.packageDirPath = path.join(__dirname, "..");
 
+    // Libraries directory (whisper models, etc.) - separate from workspace
+    this.dataDirPath =
+      process.env.LIBS_DIR_PATH ||
+      path.join(this.packageDirPath, "fantaprojekt-libs");
+    this.libsDirPath = path.join(this.dataDirPath, "libs");
     this.whisperInstallPath = path.join(this.libsDirPath, "whisper");
-    this.videosDirPath = path.join(this.dataDirPath, "videos");
-    this.tempDirPath = path.join(this.dataDirPath, "temp");
     this.installationSuccessfulPath = path.join(
       this.dataDirPath,
       "installation-successful",
     );
 
+    // Workspace directory (temp files, renders, cache, downloads)
+    this.workspaceDirPath =
+      process.env.WORKSPACE_DIR_PATH ||
+      path.join(this.packageDirPath, "workspace");
+    this.tempDirPath = path.join(this.workspaceDirPath, "temp");
+    this.videosDirPath = path.join(this.workspaceDirPath, "renders");
+    this.cacheDirPath = path.join(this.workspaceDirPath, "cache");
+    this.downloadsDirPath = path.join(this.workspaceDirPath, "downloads");
+
+    // Ensure all directories exist
     fs.ensureDirSync(this.dataDirPath);
     fs.ensureDirSync(this.libsDirPath);
-    fs.ensureDirSync(this.videosDirPath);
+    fs.ensureDirSync(this.workspaceDirPath);
     fs.ensureDirSync(this.tempDirPath);
+    fs.ensureDirSync(this.videosDirPath);
+    fs.ensureDirSync(this.cacheDirPath);
+    fs.ensureDirSync(this.downloadsDirPath);
 
-    this.packageDirPath = path.join(__dirname, "..");
+    // Static files (music, effects)
     this.staticDirPath = path.join(this.packageDirPath, "static");
     this.musicDirPath = path.join(this.staticDirPath, "music");
 

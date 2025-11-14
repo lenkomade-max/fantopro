@@ -12,9 +12,57 @@ import { ShortCreator } from "./short-creator/ShortCreator";
 import { logger } from "./logger";
 import { Server } from "./server/server";
 import { MusicManager } from "./short-creator/music";
+import { AlertManager, HealthChecker, ProcessMonitor, TelegramBotController } from "./monitoring";
 
 async function main() {
   const config = new Config();
+
+  // Initialize monitoring
+  const alertManager = new AlertManager({
+    telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+    telegramChatId: process.env.TELEGRAM_CHAT_ID,
+    enabled: process.env.MONITORING_ENABLED === 'true',
+    serverName: 'FantaProjekt API',
+    port: config.port,
+  });
+
+  const healthChecker = new HealthChecker();
+
+  // Setup process error handlers
+  process.on('uncaughtException', async (error: Error) => {
+    logger.fatal(error, 'Uncaught Exception - Server will exit');
+    await alertManager.sendUncaughtException(error);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', async (reason: unknown) => {
+    logger.error({ reason }, 'Unhandled Promise Rejection');
+    await alertManager.sendUnhandledRejection(reason);
+  });
+
+  let processMonitor: ProcessMonitor | undefined;
+  let botController: TelegramBotController | undefined;
+
+  const shutdown = async (signal: string) => {
+    logger.info(`${signal} signal received - shutting down gracefully`);
+    await alertManager.sendAlert({
+      type: 'warning',
+      message: `⚠️ Сервер получил ${signal} и завершает работу`,
+    });
+
+    // Stop monitoring components
+    if (processMonitor) {
+      processMonitor.stop();
+    }
+    if (botController) {
+      await botController.stop();
+    }
+
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
   try {
     config.ensureConfig();
   } catch (err: unknown) {
@@ -50,7 +98,45 @@ async function main() {
     ffmpeg,
     pexelsApi,
     musicManager,
+    alertManager,
   );
+
+  // Initialize ProcessMonitor
+  logger.debug("initializing process monitor");
+  processMonitor = new ProcessMonitor(shortCreator, alertManager);
+  processMonitor.start();
+
+  // Connect ProcessMonitor to ShortCreator
+  shortCreator.setProcessMonitor(processMonitor);
+
+  // Initialize TelegramBotController (if monitoring enabled)
+  if (process.env.MONITORING_ENABLED === 'true' && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+    logger.debug("initializing telegram bot controller");
+    botController = new TelegramBotController(
+      {
+        token: process.env.TELEGRAM_BOT_TOKEN,
+        chatId: process.env.TELEGRAM_CHAT_ID,
+        enabled: true,
+      },
+      shortCreator,
+      processMonitor,
+      healthChecker,
+      alertManager,
+    );
+  }
+
+  // Initialize Video Analyzer (if enabled)
+  let videoAnalyzer;
+  if (process.env.VIDEO_ANALYZER_ENABLED === 'true') {
+    logger.info("Initializing Video Analyzer module...");
+    try {
+      const { createVideoAnalyzer } = await import('./video-analyzer/factory.js');
+      videoAnalyzer = await createVideoAnalyzer(whisper);
+      logger.info("Video Analyzer initialized successfully");
+    } catch (error) {
+      logger.warn(error, "Failed to initialize Video Analyzer - module will be disabled");
+    }
+  }
 
   if (!config.runningInDocker) {
     // the project is running with npm - we need to check if the installation is correct
@@ -82,10 +168,12 @@ async function main() {
   }
 
   logger.debug("initializing the server");
-  const server = new Server(config, shortCreator);
-  const app = server.start();
+  const server = new Server(config, shortCreator, videoAnalyzer, healthChecker);
+  server.start();
 
-  // todo add shutdown handler
+  // Send notification that server started successfully
+  await alertManager.sendServerStarted();
+  logger.info('Server started successfully with monitoring enabled');
 }
 
 main().catch((error: unknown) => {

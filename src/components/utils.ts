@@ -16,15 +16,25 @@ export const shortVideoSchema = z.object({
         url: z.string(),
         duration: z.number(),
       }),
-      video: z.string(),
+      // Media support: single video (legacy) or multiple videos (with looping)
+      video: z.string().optional(),
+      videos: z.array(z.string()).optional(),
+      mediaDuration: z.number().optional(),
       // NEW: Effects and overlays
       effects: z.any().optional(),
       textOverlays: z.any().optional(),
+      advancedTextOverlays: z.any().optional(),  // Multi-color/multi-style text overlays
     }),
   ),
   config: z.object({
     paddingBack: z.number().optional(),
-    captionPosition: z.enum(["top", "center", "bottom"]).optional(),
+    captionPosition: z
+      .union([
+        z.enum(["top", "center", "bottom"]),
+        z.number(),
+        z.string().regex(/^\d+(\.\d+)?%$/),
+      ])
+      .optional(),
     captionBackgroundColor: z.string().optional(),
     durationMs: z.number(),
     musicVolume: z.nativeEnum(MusicVolumeEnum).optional(),
@@ -161,6 +171,10 @@ export function calculateVolume(
       return [0.45, false];
     case "high":
       return [0.7, false];
+    case "very_high":
+      return [0.8, false];
+    case "ultra":
+      return [0.9, false];
     default:
       return [0.7, false];
   }

@@ -7,6 +7,7 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring } from "remotion";
 import type { TextOverlay as TextOverlayType } from "../../types/shorts";
+import { resolvePosition } from "../../components/utils/position";
 
 export interface TextOverlayProps extends TextOverlayType {
   /** Scene duration in seconds */
@@ -23,8 +24,13 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
-  
+
   const currentTimeInSeconds = frame / fps;
+
+  // Calculate position using utility function (MUST be before early return - React Hooks rules)
+  const resolvedPosition = React.useMemo(() => {
+    return resolvePosition(position as any, width, height);
+  }, [position, width, height]);
 
   // Calculate visibility based on timing
   const startTime = timing?.start ?? 0;
@@ -41,34 +47,25 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
   const durationFrames = endFrame - startFrame;
   const relativeFrame = frame - startFrame;
 
-  // Calculate position
-  const getXPosition = (): string | number => {
-    if (typeof position.x === "number") return position.x;
-    switch (position.x) {
-      case "left": return "5%";
-      case "center": return "50%";
-      case "right": return "95%";
-      default: return "50%";
-    }
-  };
-
-  const getYPosition = (): string | number => {
-    if (typeof position.y === "number") return position.y;
-    switch (position.y) {
-      case "top": return "10%";
-      case "center": return "50%";
-      case "bottom": return "90%";
-      default: return "50%";
-    }
-  };
-
   const getTransform = (): string => {
     let transform = "";
-    
-    if (position.x === "center" || position.x === "right") {
+
+    // Center alignment for aliases and percentages
+    // Need to check ORIGINAL position value before resolvePosition() converted it
+    const needsXCenter =
+      position.x === "center" ||
+      position.x === "right" ||
+      (typeof position.x === "string" && position.x.endsWith("%") && parseFloat(position.x) > 0);
+
+    const needsYCenter =
+      position.y === "center" ||
+      position.y === "bottom" ||
+      (typeof position.y === "string" && position.y.endsWith("%") && parseFloat(position.y) > 0);
+
+    if (needsXCenter) {
       transform += "translateX(-50%) ";
     }
-    if (position.y === "center" || position.y === "bottom") {
+    if (needsYCenter) {
       transform += "translateY(-50%) ";
     }
 
@@ -150,8 +147,8 @@ export const TextOverlay: React.FC<TextOverlayProps> = ({
 
   const containerStyle: React.CSSProperties = {
     position: "absolute",
-    left: getXPosition(),
-    top: getYPosition(),
+    left: resolvedPosition.x,
+    top: resolvedPosition.y,
     transform: animationStyle.transform || getTransform(),
     fontSize: style.fontSize ?? 32,
     fontFamily: style.fontFamily ?? "Arial, sans-serif",

@@ -15,6 +15,7 @@ import { Config } from "../../config";
 import { logger } from "../../logger";
 import type { Effect, BlendEffect, BannerOverlayEffect } from "../../types/shorts";
 import { OverlayCache } from "./OverlayCache";
+import { resolvePosition, getVideoDimensions } from "../../components/utils/position";
 
 export interface ProcessedBlendEffect {
   type: "blend";
@@ -38,8 +39,8 @@ export interface ProcessedBannerEffect {
     blend: number;
   };
   position: {
-    x: number;
-    y: number;
+    x: number | string;  // Pixels, percentage ("50%"), or alias ("left", "center", "right")
+    y: number | string;  // Pixels, percentage ("50%"), or alias ("top", "center", "bottom")
   };
   duration?: "full" | { start: number; end: number };
   isVideo: boolean;
@@ -269,7 +270,9 @@ export class EffectManager {
         similarity: 0.2,
         blend: 0.2,
       },
-      position: effect.position ?? {
+      // BANNER POSITION: Always static at (0, 0) - full screen overlay
+      // User prepares banner with greenscreen in exact position needed
+      position: {
         x: 0,
         y: 0,
       },
@@ -363,7 +366,7 @@ export class EffectManager {
   async applyBlendOverlay(
     baseVideo: string,
     overlayVideo: string,
-    blendMode: "addition" | "screen" | "overlay" | "multiply" | "average" | "lighten" = "addition",
+    blendMode: "addition" | "screen" | "overlay" | "multiply" | "average" | "lighten" | "darken" | "hardlight" = "addition",
     opacity: number = 0.5,
     width: number = 1080,
     height: number = 1920
@@ -389,7 +392,7 @@ export class EffectManager {
         .input(baseVideo)
         .input(overlayVideo)
         .complexFilter(filterComplex)
-        .outputOptions(['-map', '[out]'])
+        .outputOptions(['-map', '[out]', '-map', '0:a?', '-c:a', 'aac', '-b:a', '192k'])
         .output(outputPath)
         .on('start', (commandLine) => {
           logger.debug({ commandLine }, "FFmpeg blend command started");
@@ -420,7 +423,9 @@ export class EffectManager {
    * @param bannerVideo - Path to banner video with green screen (#00FF00)
    * @param similarity - How similar colors to remove (0.0 - 1.0, default: 0.2 aggressive)
    * @param blend - Edge softness (0.0 - 1.0, default: 0.2)
-   * @param position - Banner position {x, y} (default: {0, 0} top-left)
+   * @param position - Banner position {x, y} - supports pixels (100), percentages ("50%"), or aliases ("left", "center", "right", "top", "bottom")
+   * @param duration - Time range for banner appearance (default: "full", or {start: number, end: number} in seconds)
+   * @param orientation - Video orientation ("portrait" or "landscape") for position resolution
    * @returns Path to output video with banner overlay applied
    */
   async applyBannerChromakey(
@@ -428,9 +433,19 @@ export class EffectManager {
     bannerVideo: string,
     similarity: number = 0.2,
     blend: number = 0.2,
-    position: { x: number; y: number } = { x: 0, y: 0 }
+    position: { x: number | string; y: number | string } = { x: 0, y: 0 },
+    duration?: "full" | { start: number; end: number },
+    orientation: "portrait" | "landscape" = "portrait"
   ): Promise<string> {
     const outputPath = path.join(this.config.tempDirPath, `banner_${this.generateTempId()}.mp4`);
+
+    // Resolve position from flexible format (pixels, percentages, aliases) to absolute pixels
+    const videoDimensions = getVideoDimensions(orientation);
+    const resolvedPosition = resolvePosition(
+      position as any,
+      videoDimensions.width,
+      videoDimensions.height
+    );
 
     logger.info({
       baseVideo,
@@ -438,20 +453,33 @@ export class EffectManager {
       similarity,
       blend,
       position,
+      resolvedPosition,
+      duration,
       outputPath,
     }, "Applying FFmpeg chromakey banner");
 
+    // Build overlay filter with optional time-based enable
+    let overlayFilter = `overlay=${resolvedPosition.x}:${resolvedPosition.y}:shortest=1`;
+
+    // Add enable option for time-based appearance
+    if (duration && duration !== "full") {
+      overlayFilter += `:enable='between(t,${duration.start},${duration.end})'`;
+    }
+
+    // Banner должен быть уже правильного размера (portrait: 1080x1920, landscape: 1920x1080)
+    // Просто убираем greenscreen и накладываем баннер как есть
     const filterComplex = [
       `[1:v]chromakey=0x00FF00:${similarity}:${blend}[banner]`,
-      `[0:v][banner]overlay=${position.x}:${position.y}[out]`
+      `[0:v][banner]${overlayFilter}[out]`
     ].join(';');
 
     return new Promise((resolve, reject) => {
       ffmpeg()
         .input(baseVideo)
         .input(bannerVideo)
+        .inputOptions(['-stream_loop', '-1'])
         .complexFilter(filterComplex)
-        .outputOptions(['-map', '[out]'])
+        .outputOptions(['-map', '[out]', '-map', '0:a?', '-c:a', 'aac', '-b:a', '192k'])
         .output(outputPath)
         .on('start', (commandLine) => {
           logger.debug({ commandLine }, "FFmpeg chromakey command started");

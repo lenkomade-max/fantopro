@@ -9,6 +9,12 @@ import {
 } from "remotion";
 import { z } from "zod";
 import { loadFont } from "@remotion/google-fonts/BarlowCondensed";
+import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
+import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
+import { loadFont as loadBebasNeue } from "@remotion/google-fonts/BebasNeue";
+import { loadFont as loadRoboto } from "@remotion/google-fonts/Roboto";
+import { loadFont as loadMontserrat } from "@remotion/google-fonts/Montserrat";
+import { loadFont as loadOpenSans } from "@remotion/google-fonts/OpenSans";
 
 import {
   calculateVolume,
@@ -16,9 +22,19 @@ import {
   shortVideoSchema,
 } from "../utils";
 import { TextOverlay } from "../../remotion/compositions/TextOverlay";
+import { AdvancedTextOverlay } from "../../remotion/compositions/AdvancedTextOverlay";
 import { KenBurnsImage } from "../../remotion/compositions/KenBurnsImage";
+import { resolvePositionValue } from "../utils/position";
 
-const { fontFamily } = loadFont(); // "Barlow Condensed"
+const { fontFamily } = loadFont(); // "Barlow Condensed" (for captions)
+
+// Load fonts for text overlays (Crime videos)
+loadAnton();
+loadOswald();
+loadBebasNeue();
+loadRoboto();
+loadMontserrat();
+loadOpenSans();
 
 // Helper function to determine if file is video based on extension
 const isVideoFile = (url: string): boolean => {
@@ -43,22 +59,19 @@ export const LandscapeVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
     borderRadius: "10px",
   };
 
+  // Resolve caption position from flexible format (pixels, percentages, aliases) to absolute pixels
   const captionPosition = config.captionPosition ?? "center";
-  let captionStyle = {};
-  if (captionPosition === "top") {
-    captionStyle = { top: 100 };
-  }
-  if (captionPosition === "center") {
-    captionStyle = { top: "50%", transform: "translateY(-50%)" };
-  }
-  if (captionPosition === "bottom") {
-    captionStyle = { bottom: 100 };
-  }
+  const VIDEO_HEIGHT = 1080; // Landscape height
+  const resolvedCaptionY = resolvePositionValue(captionPosition, VIDEO_HEIGHT, true);
+
+  const captionStyle = {
+    top: resolvedCaptionY,
+  };
 
   const [musicVolume, musicMuted] = calculateVolume(config.musicVolume);
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "white" }}>
+    <AbsoluteFill style={{ backgroundColor: "black" }}>
       <Audio
         loop
         src={music.url}
@@ -69,7 +82,7 @@ export const LandscapeVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
       />
 
       {scenes.map((scene, i) => {
-        const { captions, audio, video, effects, textOverlays } = scene;
+        const { captions, audio, video, videos, mediaDuration, effects, textOverlays, advancedTextOverlays } = scene;
         const pages = createCaptionPages({
           captions,
           lineMaxLength: 30,
@@ -92,31 +105,96 @@ export const LandscapeVideo: React.FC<z.infer<typeof shortVideoSchema>> = ({
 
         const sceneDuration = audio.duration;
 
+        // Check if using multi-media looping mode
+        const useMultiMedia = videos && mediaDuration;
+
         return (
           <Sequence
             from={startFrame}
             durationInFrames={durationInFrames}
             key={`scene-${i}`}
           >
-            {/* Render video or image with Ken Burns effect */}
-            {isVideoFile(video) ? (
-              <OffthreadVideo src={video} muted />
+            {/* Render media based on mode */}
+            {useMultiMedia ? (
+              // NEW: Multi-media looping mode
+              (() => {
+                // Add paddingBack to last scene's total duration
+                const isLastScene = i === scenes.length - 1;
+                const paddingBackSeconds = (isLastScene && config.paddingBack) ? config.paddingBack / 1000 : 0;
+                const totalSceneDuration = sceneDuration + paddingBackSeconds;
+                const totalSlots = Math.ceil(totalSceneDuration / mediaDuration);
+                const mediaSequences = [];
+
+                for (let slot = 0; slot < totalSlots; slot++) {
+                  const mediaIndex = slot % videos.length;
+                  const currentMedia = videos[mediaIndex];
+                  const slotStartTime = slot * mediaDuration;
+                  const slotDuration = Math.min(mediaDuration, totalSceneDuration - slotStartTime);
+                  const slotStartFrame = Math.round(slotStartTime * fps);
+                  const slotDurationFrames = Math.round(slotDuration * fps);
+
+                  mediaSequences.push(
+                    <Sequence
+                      key={`media-${slot}`}
+                      from={slotStartFrame}
+                      durationInFrames={slotDurationFrames}
+                    >
+                      {isVideoFile(currentMedia) ? (
+                        <OffthreadVideo src={currentMedia} muted />
+                      ) : (
+                        <KenBurnsImage
+                          src={currentMedia}
+                          durationInSeconds={slotDuration}
+                          zoomDirection="in"
+                          panDirection="none"
+                        />
+                      )}
+                    </Sequence>
+                  );
+                }
+
+                return <>{mediaSequences}</>;
+              })()
             ) : (
-              <KenBurnsImage 
-                src={video}
-                durationInSeconds={sceneDuration}
-                zoomDirection="in"
-                panDirection="none"
-              />
+              // LEGACY: Single media for entire scene
+              (() => {
+                const isLastScene = i === scenes.length - 1;
+                const paddingBackSeconds = (isLastScene && config.paddingBack) ? config.paddingBack / 1000 : 0;
+                const totalDuration = sceneDuration + paddingBackSeconds;
+
+                return (
+                  <>
+                    {isVideoFile(video!) ? (
+                      <OffthreadVideo src={video!} muted />
+                    ) : (
+                      <KenBurnsImage
+                        src={video!}
+                        durationInSeconds={totalDuration}
+                        zoomDirection="in"
+                        panDirection="none"
+                      />
+                    )}
+                  </>
+                );
+              })()
             )}
             <Audio src={audio.url} />
 
             {/* Effects are applied via FFmpeg post-processing (not in Remotion) */}
 
-            {/* Text Overlays */}
+            {/* Text Overlays (legacy simple text) */}
             {textOverlays?.map((overlay: any, overlayIdx: number) => (
               <TextOverlay
                 key={`overlay-${i}-${overlayIdx}`}
+                {...overlay}
+                sceneDuration={sceneDuration}
+              />
+            ))}
+
+            {/* Advanced Text Overlays (multi-color/multi-style support) */}
+            {advancedTextOverlays?.map((overlay: any, overlayIdx: number) => (
+              <AdvancedTextOverlay
+                key={`advanced-overlay-${i}-${overlayIdx}`}
                 {...overlay}
                 sceneDuration={sceneDuration}
               />

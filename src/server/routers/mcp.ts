@@ -32,17 +32,17 @@ export class MCPRouter {
   private setupMCPServer() {
     this.mcpServer.tool(
       "get-video-status",
-      "Get the status of a video (ready, processing, failed)",
+      "Get the status of a video (ready, processing, failed) with progress and current stage",
       {
         videoId: z.string().describe("The ID of the video"),
       },
       async ({ videoId }) => {
-        const status = this.shortCreator.status(videoId);
+        const statusInfo = this.shortCreator.status(videoId);
         return {
           content: [
             {
               type: "text",
-              text: status,
+              text: JSON.stringify(statusInfo, null, 2),
             },
           ],
         };

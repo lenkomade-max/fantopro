@@ -42,6 +42,7 @@ out/
 # Media directories
 static/effects/
 static/music/
+static/video-analyzer/
 outputs/
 videos/
 images/
@@ -151,4 +152,39 @@ public
 
 # Temporary folders
 tmp/
-temp/\n# Exclude nested repo\noriginal/
+temp/
+
+# Exclude nested repo
+original/
+dist/video-analyzer/enhancers/**
+
+# AI Agents temporary files (v2.2.0 reorganization)
+.ai-temp/
+
+# Archived files (old reports, scripts, etc.)
+archive/
+
+# Other projects (not part of FantaProjekt render/montage API)
+trend-maker-site/
+other-projects/
+workflows/
+workspace/
+test-data/
+
+# Documentation not related to render/montage API
+Документы/ADSPOWER*
+Документы/CRIME*
+Документы/Журнал/20251029_ADSPOWER*
+Документы/Журнал/contex000/
+
+# Fanta Site Editor (separate project, not part of render API)
+src/editor/
+src/integration/
+
+# Libraries (large binaries, can be reinstalled)
+fantaprojekt-libs/
+
+# MCP configuration (local development files)
+.mcp.json
+.mcp.json.backup
+.refresh3

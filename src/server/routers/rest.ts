@@ -3,6 +3,7 @@ import type {
   Request as ExpressRequest,
   Response as ExpressResponse,
 } from "express";
+import cors from "cors";
 import fs from "fs-extra";
 import path from "path";
 
@@ -22,9 +23,16 @@ export class APIRouter {
     this.router = express.Router();
     this.shortCreator = shortCreator;
 
+    // Enable CORS for web frontend
+    this.router.use(cors({
+      origin: '*', // Allow all origins in development (change to specific URL in production)
+      credentials: false, // Set to true only if using cookies/auth headers
+      optionsSuccessStatus: 200, // Legacy browser support
+    }));
+
     // Increase payload limit to support base64 photo uploads in JSON
-    this.router.use(express.json({ limit: "50mb" }));
-    this.router.use(express.urlencoded({ limit: "50mb", extended: true }));
+    this.router.use(express.json({ limit: "150mb" }));
+    this.router.use(express.urlencoded({ limit: "150mb", extended: true }));
 
     this.setupRoutes();
   }
@@ -166,10 +174,8 @@ export class APIRouter {
           });
           return;
         }
-        const status = this.shortCreator.status(videoId);
-        res.status(200).json({
-          status,
-        });
+        const statusInfo = this.shortCreator.status(videoId);
+        res.status(200).json(statusInfo);
       },
     );
 
